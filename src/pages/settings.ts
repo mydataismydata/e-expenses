@@ -7,7 +7,7 @@ import { field, notice, shell } from './shell'
 
 export async function settingsPage(): Promise<HTMLElement> {
   const settings = await getSettings()
-  const userName = h('input', { type: 'text', value: settings.userName, placeholder: 'Jane Doe', autocomplete: 'name' })
+  const userName = h('input', { type: 'text', value: settings.userName, placeholder: 'First Last', autocomplete: 'name' })
   const status = h('div')
 
   const capInputs = EXPENSE_TYPES.map((t) => ({
@@ -41,7 +41,7 @@ export async function settingsPage(): Promise<HTMLElement> {
 
   return shell('Settings', '/', [
     h('form', { onsubmit: (e: Event) => { e.preventDefault(); void save() } },
-      field('Your name', userName, 'Used as "Name" on the report and in the Excel file name (J_DOE).'),
+      field('Your name', userName, 'Used as "Name" on the report and in the Excel file name (e.g. J_DOE).'),
       h('h2', null, 'Maximum claim per expense type'),
       h('p', { class: 'muted' }, 'When a type has a maximum, the claimed amount is the receipt total or the maximum, whichever is lower. Leave blank for no limit. You can still override the amount on a receipt.'),
       h('div', { class: 'caps' }, ...capInputs.map(({ type, input }) => field(type, input))),
