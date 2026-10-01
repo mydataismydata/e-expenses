@@ -1,0 +1,8 @@
+node_modules
+dist
+dev-dist
+out
+public/ocr
+# Personal sample data used while developing - never commit
+.working
+.claude

@@ -1,0 +1,30 @@
+{
+  "name": "expense-reports",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "copy-ocr": "node scripts/copy-ocr-assets.mjs",
+    "predev": "npm run copy-ocr",
+    "prebuild": "npm run copy-ocr"
+  },
+  "dependencies": {
+    "idb": "^8.0.3",
+    "jszip": "^3.10.2",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.3.289",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@tesseract.js-data/eng": "^1.0.0",
+    "@types/node": "^26.6.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.2",
+    "vite-plugin-pwa": "^1.3.0",
+    "vitest": "^5.0.3"
+  }
+}
