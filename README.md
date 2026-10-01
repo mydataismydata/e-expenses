@@ -32,12 +32,12 @@ The Excel template lives in `src/assets/ExpenseReportForm_Template_US.xlsx`. It 
    - Build command: `npm run build`
    - Build output directory: `dist`
    - Environment variable: `NODE_VERSION` = `22`
-3. **Lock it down with Cloudflare Access** – Pages project → Settings → General → *Access policy* → Enable (this creates an Access application for `<project>.pages.dev` and its preview URLs), or do it by hand in Zero Trust → Access → Applications → Self-hosted. Add an *Allow* policy for your email address(es) with the One-time PIN login method.
-4. **Install on the phone** – open the URL in Chrome on Android, sign in, wait for the first load to finish (about 17 MB is cached for offline use), then menu → *Install app*. After that it works in airplane mode.
+3. **Login gate (free, no card)** – `functions/_middleware.ts` is a Cloudflare Pages Function that asks for a username and password before serving anything. Set the credentials in the Pages project → Settings → Variables and Secrets (add them for both Production and Preview): `APP_USER` and `APP_PASSWORD` (type *Secret*). If either is missing the site returns 503 instead of serving. (Cloudflare Access is the alternative, but it needs a card on file.)
+4. **Install on the phone** – open the URL in Chrome on Android, sign in with the login, wait for the first load to finish (about 17 MB is cached for offline use), then menu → *Install app*. After that it works in airplane mode.
 
 Notes:
-- The manifest is requested with credentials (`crossorigin="use-credentials"`) so installation works behind Access.
-- Because the app is cached, an expired Access session does not lock you out offline. New versions download when you are online and show a "Reload" bar.
+- The manifest is requested with credentials (`crossorigin="use-credentials"`) so installation works behind the login.
+- Once installed the app is served from the on-device cache, so it never asks for the login again offline. Changing the password only affects new devices and updates. New versions download when you are online and show a "Reload" bar.
 - Clearing site data or uninstalling the app deletes the local database. Restore from a backup ZIP.
 
 ## Limits
