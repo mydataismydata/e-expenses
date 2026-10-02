@@ -1,65 +1,143 @@
+/* App layout on top of Clean grids (src/styles/clean-grids). Tokens only, no colours. */
+
 :root {
-  --bg: #f5f6f8;
-  --surface: #fff;
-  --text: #1c2430;
-  --muted: #667085;
-  --line: #dfe3ea;
-  --primary: #1f4e79;
-  --primary-text: #fff;
-  --danger: #b42318;
-  --warn-bg: #fff4d6;
-  --info-bg: #e6f0fa;
-  --err-bg: #fde7e4;
-  color-scheme: light dark;
+  /* Forms read better narrow; the app bar lines up with the page. */
+  --page-max: 760px;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #12161c;
-    --surface: #1b212a;
-    --text: #e8ecf1;
-    --muted: #98a2b3;
-    --line: #2d3541;
-    --primary: #5b9bd5;
-    --primary-text: #0b1117;
-    --danger: #f97066;
-    --warn-bg: #3b3115;
-    --info-bg: #17293b;
-    --err-bg: #3d1d19;
+
+body {
+  min-height: 100dvh;
+}
+
+.appbar-top {
+  padding-top: max(var(--sp-2), env(safe-area-inset-top));
+}
+.page {
+  padding-bottom: calc(var(--sp-8) + env(safe-area-inset-bottom));
+}
+
+/* "← Reports" above the page title. */
+.back {
+  display: inline-block;
+  margin-bottom: var(--sp-2);
+}
+.page-head h1 {
+  overflow-wrap: anywhere;
+}
+
+.cards {
+  display: grid;
+  gap: var(--sp-3);
+}
+.figure {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* Two fields side by side; one column on a phone. */
+.pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+}
+/* An amount and its currency. */
+.amount-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 11rem);
+  gap: var(--sp-2);
+}
+@media (max-width: 480px) {
+  .pair {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
-* { box-sizing: border-box; }
-body { margin: 0; font: 16px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); }
-.page { max-width: 760px; margin: 0 auto; padding-bottom: 6rem; }
-.bar { display: flex; align-items: center; gap: .5rem; padding: .75rem 1rem; padding-top: max(.75rem, env(safe-area-inset-top)); position: sticky; top: 0; background: var(--bg); z-index: 5; }
-.bar h1 { font-size: 1.25rem; margin: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.back { font-size: 1.8rem; line-height: 1; text-decoration: none; color: var(--primary); padding: 0 .4rem; }
-main { padding: 0 1rem; }
-h2 { font-size: 1.05rem; margin: 1.5rem 0 .25rem; }
-.muted { color: var(--muted); } .small { font-size: .8rem; } .empty { text-align: center; padding: 2rem 0; }
-.actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; }
-.actions.sticky { position: sticky; bottom: 0; background: var(--bg); padding: .75rem 0; margin-bottom: 0; padding-bottom: max(.75rem, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
-.btn { font: inherit; padding: .6rem 1rem; border-radius: .6rem; border: 1px solid var(--line); background: var(--surface); color: var(--text); text-decoration: none; cursor: pointer; display: inline-block; }
-.btn.primary { background: var(--primary); color: var(--primary-text); border-color: var(--primary); }
-.btn.danger { color: var(--danger); } .btn.ghost { border-color: transparent; background: transparent; color: var(--primary); }
-.btn:disabled { opacity: .5; cursor: not-allowed; }
-.cards { display: grid; gap: .75rem; }
-.card { display: block; background: var(--surface); border: 1px solid var(--line); border-radius: .8rem; padding: .9rem 1rem; text-decoration: none; color: inherit; }
-.card-title { font-weight: 600; } .card-meta { display: flex; justify-content: space-between; margin-top: .4rem; }
-.field { display: block; margin: .9rem 0; }
-.field .label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: .2rem; }
-.hint { display: block; color: var(--muted); margin-top: .2rem; }
-input, select { font: inherit; width: 100%; padding: .6rem .7rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--surface); color: var(--text); }
-input[type=file] { display: none; }
-.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
-.caps { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0 1rem; }
-.notice { padding: .6rem .8rem; border-radius: .6rem; margin: .75rem 0; }
-.notice.info { background: var(--info-bg); } .notice.warn { background: var(--warn-bg); } .notice.error { background: var(--err-bg); }
-.preview { margin: .5rem 0; } .preview img, .preview canvas { max-width: 100%; max-height: 360px; border: 1px solid var(--line); border-radius: .5rem; display: block; }
-table.rows { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); border-radius: .6rem; overflow: hidden; }
-table.rows th, table.rows td { padding: .5rem .6rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
-table.rows th { font-size: .8rem; color: var(--muted); }
-.num { text-align: right !important; white-space: nowrap; } .file { font-size: .78rem; word-break: break-all; }
-tr.click { cursor: pointer; } tr.click:hover { background: var(--bg); } tfoot td { font-weight: 600; border-bottom: 0 !important; }
-@media (max-width: 560px) { .hide-sm { display: none; } }
-.update { position: fixed; left: 1rem; right: 1rem; bottom: 1rem; background: var(--primary); color: var(--primary-text); padding: .7rem 1rem; border-radius: .7rem; display: flex; gap: 1rem; align-items: center; justify-content: space-between; z-index: 20; }
-.update .btn { padding: .3rem .8rem; }
+
+.caps {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--sp-4);
+}
+
+.preview:empty {
+  display: none;
+}
+.preview img,
+.preview canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  border: 1px solid var(--c-line);
+}
+
+/* Receipts table: the payee cell carries the export file name under it. */
+.table .file {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--c-muted);
+  word-break: break-all;
+}
+.table td {
+  vertical-align: top;
+}
+.table tr.click {
+  cursor: pointer;
+}
+.table tfoot td {
+  border-top: 1px solid var(--c-line);
+  border-bottom: 0;
+  background: var(--c-surface-2);
+  font-weight: 600;
+}
+@media (max-width: 560px) {
+  .hide-sm {
+    display: none;
+  }
+}
+
+/* Save and delete stay in reach at the bottom of a long form. */
+.savebar {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  box-shadow: var(--sh-dock);
+}
+/* On a phone it runs edge to edge, above the home indicator. */
+@media (max-width: 640px) {
+  .savebar {
+    margin: 0 calc(-1 * var(--gutter));
+    padding: var(--sp-3) var(--gutter) max(var(--sp-3), env(safe-area-inset-bottom));
+    border-width: 1px 0 0;
+  }
+}
+
+/* "A new version is available" rides on the toast. */
+.toast.update {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  bottom: max(var(--sp-4), env(safe-area-inset-bottom));
+}
+.toast.update .btn {
+  height: var(--control-h-sm);
+}
+
+input[type='file'] {
+  display: none;
+}
+
+/* "Delete this receipt?" takes the whole row, bar or list line it replaces. */
+.confirm-ask {
+  flex: 1 1 100%;
+}
+
+/* Status lines are empty most of the time; they should not leave a gap. */
+.stack > div:empty {
+  display: none;
+}

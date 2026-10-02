@@ -6,3 +6,7 @@ public/ocr
 # Personal sample data used while developing - never commit
 .working
 .claude
+# Excel templates stay on the device (picked in the app) and never go in this public repo.
+# Put local copies in templates/ to run the Excel tests.
+templates
+*.xlsx

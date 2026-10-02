@@ -1,32 +1,98 @@
-import { claimedAmount, sortReceipts } from '../claim'
-import { getReport, getSettings, listReceipts } from '../db'
+import { claimedAmount, sortReceipts, totalClaimed, usdAmount } from '../claim'
+import { getReport, getSettings, listReceipts, listTemplates, saveReceipt, saveReport } from '../db'
 import { fmtDate, h, money } from '../dom'
-import { buildExport, download } from '../export'
+import { buildExport, download, todayIso } from '../export'
 import { receiptFileName } from '../naming'
-import { go, notice, shell } from './shell'
+import { needsRate, refreshRates } from '../rates'
+import { addTemplate, templateFor } from '../templates'
+import type { Receipt } from '../types'
+import { field, go, notice, refresh, select, shell } from './shell'
+
+const ADD_TEMPLATE = '__add__'
 
 export async function reportViewPage(id: string): Promise<HTMLElement> {
   const report = await getReport(id)
-  if (!report) return shell('Not found', '/', [notice('error', 'This report no longer exists.')])
-  const settings = await getSettings()
+  if (!report) return shell({ title: 'Not found', back: ['/', 'Reports'] }, [notice('error', 'This report no longer exists.')])
+  const [settings, templates] = await Promise.all([getSettings(), listTemplates()])
   const receipts = sortReceipts(await listReceipts(id))
-  const total = receipts.reduce((a, r) => a + claimedAmount(r, settings.caps), 0)
+  const { total, pending } = totalClaimed(receipts, settings.caps)
+  const today = todayIso()
 
+  // ---- exchange rates: fetched in the background, the page redraws when they arrive
+  const rateBox = h('div')
+  async function getRates(quiet: boolean) {
+    if (!quiet) rateBox.replaceChildren(notice('info', 'Getting exchange rates…'))
+    const res = await refreshRates(receipts, today, saveReceipt)
+    if (res.updated) return refresh()
+    if (!quiet) rateBox.replaceChildren(notice(res.missing ? 'warn' : 'ok', res.error ?? (res.missing ? 'No rate is published for those dates yet. Try again later, or type the rate on the receipt.' : 'Rates are up to date.')))
+  }
+  if (pending) {
+    rateBox.replaceChildren(
+      h(
+        'div',
+        { class: 'notice' },
+        `${pending} receipt${pending === 1 ? ' needs' : 's need'} an exchange rate. It is fetched when you are online. `,
+        h('button', { class: 'linkish', type: 'button', onclick: () => void getRates(false) }, 'Get rates now'),
+      ),
+    )
+  }
+  if (navigator.onLine && receipts.some((r) => needsRate(r, today))) void getRates(true).catch(() => {})
+
+  // ---- template and export
   const status = h('div')
+  const chosen = templateFor(report, settings, templates)
+  const picker = h('input', {
+    type: 'file',
+    accept: '.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    onchange: async () => {
+      const f = picker.files?.[0]
+      picker.value = ''
+      if (!f) return
+      try {
+        const { template } = await addTemplate(f)
+        await saveReport({ ...report, templateId: template.id })
+        refresh()
+      } catch (e) {
+        status.replaceChildren(notice('error', e instanceof Error ? e.message : String(e)))
+      }
+    },
+  })
+  const templateSel = select(
+    {
+      onchange: async () => {
+        if (templateSel.value === ADD_TEMPLATE) {
+          templateSel.value = chosen?.id ?? ''
+          return picker.click()
+        }
+        await saveReport({ ...report, templateId: templateSel.value })
+        report.templateId = templateSel.value
+      },
+    },
+    ...templates.map((t) => h('option', { value: t.id, selected: t.id === chosen?.id }, `${t.name}${t.id === settings.defaultTemplateId ? ' (default)' : ''}`)),
+    h('option', { value: ADD_TEMPLATE }, '＋ Add template…'),
+  )
+
   const exportBtn = h(
     'button',
     {
-      class: 'btn primary',
-      disabled: receipts.length === 0,
+      class: 'btn',
+      type: 'button',
+      disabled: receipts.length === 0 || templates.length === 0,
       onclick: async () => {
         exportBtn.disabled = true
-        status.replaceChildren(notice('info', 'Building ZIP…'))
         try {
-          const { blob, name } = await buildExport(report, receipts, settings)
+          const template = templates.find((t) => t.id === templateSel.value) ?? chosen
+          if (!template) throw new Error('Add an Excel template first.')
+          if (receipts.some((r) => needsRate(r, today))) {
+            status.replaceChildren(notice('info', 'Getting exchange rates…'))
+            await refreshRates(receipts, today, saveReceipt)
+          }
+          status.replaceChildren(notice('info', 'Building ZIP…'))
+          const { blob, name } = await buildExport(report, receipts, settings, template.file)
           download(blob, name)
-          status.replaceChildren(notice('info', `Downloaded ${name}`))
+          status.replaceChildren(notice('ok', `Downloaded ${name}`))
         } catch (e) {
-          status.replaceChildren(notice('error', `Export failed: ${e instanceof Error ? e.message : e}`))
+          status.replaceChildren(notice('error', `Export failed. ${e instanceof Error ? e.message : e}`))
         } finally {
           exportBtn.disabled = false
         }
@@ -35,36 +101,77 @@ export async function reportViewPage(id: string): Promise<HTMLElement> {
     'Export ZIP (Excel + PDFs)',
   )
 
-  const rows = receipts.map((r, i) => {
+  const exportCard = h(
+    'section',
+    { class: 'card pad stack' },
+    templates.length
+      ? field('Excel template', templateSel, 'Kept on this device. Add or remove templates in Settings.')
+      : h(
+          'div',
+          { class: 'stack tight' },
+          h('span', { class: 'kicker' }, 'Excel template'),
+          h('p', null, 'Choose the Excel template to fill, for example the US or the French form. It stays on this device and is not part of the app.'),
+          h('div', { class: 'row' }, h('button', { class: 'btn quiet', type: 'button', onclick: () => picker.click() }, 'Choose Excel template…')),
+        ),
+    h('div', { class: 'row' }, exportBtn),
+    status,
+    picker,
+  )
+
+  // ---- receipts
+  const amountCell = (r: Receipt) => {
     const claimed = claimedAmount(r, settings.caps)
+    const usd = usdAmount(r)
+    const foreign = r.currency !== 'USD'
     return h(
+      'td',
+      { class: 'num' },
+      claimed === null ? h('span', { class: 'tag warn' }, 'Rate pending') : h('span', { class: 'figure' }, money(claimed)),
+      foreign ? h('div', { class: 'small muted mono' }, money(r.amount, r.currency), r.fx ? ` × ${r.fx.rate}` : '') : null,
+      claimed !== null && usd !== null && claimed !== usd ? h('div', { class: 'small muted mono' }, `of ${money(usd)}`) : null,
+    )
+  }
+  const rows = receipts.map((r, i) =>
+    h(
       'tr',
       { class: 'click', onclick: () => go(`/receipt/${r.id}`) },
-      h('td', null, String(i + 1)),
-      h('td', null, fmtDate(r.date)),
-      h('td', null, h('div', null, r.payee || '—'), h('div', { class: 'file muted' }, receiptFileName(i + 1, r))),
+      h('td', { class: 'mono' }, String(i + 1)),
+      h('td', { class: 'nowrap' }, fmtDate(r.date)),
+      h('td', null, h('a', { href: `#/receipt/${r.id}` }, r.payee || '—'), h('div', { class: 'file' }, receiptFileName(i + 1, r))),
       h('td', { class: 'hide-sm' }, r.type),
-      h('td', { class: 'num' }, money(claimed), claimed !== r.amount ? h('div', { class: 'muted small' }, `of ${money(r.amount)}`) : null),
-    )
-  })
-
-  return shell(
-    report.name,
-    '/',
-    [
-      h('p', { class: 'muted' }, `${fmtDate(report.from)} – ${fmtDate(report.to)}`, report.projectRef ? ` · Project ${report.projectRef}` : '', report.invoiced ? ` · Invoiced ${report.invoiced}` : ''),
-      !settings.userName ? notice('warn', 'Set your name in Settings before exporting.') : null,
-      h('div', { class: 'actions' }, h('a', { class: 'btn', href: `#/receipt/new?report=${id}` }, '＋ Add receipt'), exportBtn, h('a', { class: 'btn ghost', href: `#/report/${id}/edit` }, 'Edit report')),
-      status,
-      receipts.length
-        ? h(
+      amountCell(r),
+    ),
+  )
+  const table = receipts.length
+    ? h(
+        'section',
+        { class: 'card' },
+        h(
+          'div',
+          { class: 'table-wrap' },
+          h(
             'table',
-            { class: 'rows' },
+            { class: 'table' },
             h('thead', null, h('tr', null, ...['#', 'Date', 'Payee / file', 'Type', 'Claimed'].map((t, i) => h('th', { class: i === 3 ? 'hide-sm' : i === 4 ? 'num' : '' }, t)))),
             h('tbody', null, ...rows),
-            h('tfoot', null, h('tr', null, h('td', { colSpan: 4, class: 'num' }, 'Total'), h('td', { class: 'num' }, money(total)))),
-          )
-        : h('p', { class: 'muted empty' }, 'No receipts in this report yet.'),
-    ].filter(Boolean) as Node[],
+            h(
+              'tfoot',
+              null,
+              h('tr', null, h('td', { colSpan: 3 }, 'Total'), h('td', { class: 'hide-sm' }), h('td', { class: 'num figure' }, money(total), pending ? h('div', { class: 'small muted' }, `+ ${pending} pending`) : null)),
+            ),
+          ),
+        ),
+      )
+    : h('p', { class: 'card empty' }, 'No receipts in this report yet.')
+
+  const sub = [`${fmtDate(report.from)} – ${fmtDate(report.to)}`, report.projectRef && `Project ${report.projectRef}`, report.invoiced && `Invoiced ${report.invoiced}`].filter(Boolean).join(' · ')
+  return shell(
+    {
+      title: report.name,
+      sub,
+      back: ['/', 'Reports'],
+      actions: [h('a', { class: 'btn quiet', href: `#/receipt/new?report=${id}` }, '＋ Add receipt'), h('a', { class: 'btn quiet', href: `#/report/${id}/edit` }, 'Edit')],
+    },
+    [!settings.userName ? notice('warn', 'Set your name in Settings before exporting.') : null, rateBox, exportCard, table].filter(Boolean) as Node[],
   )
 }

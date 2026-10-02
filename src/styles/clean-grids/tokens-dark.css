@@ -1,0 +1,105 @@
+/* ---------------------------------------------------------------------------
+   Clean grids: tokens, dark theme
+   ---------------------------------------------------------------------------
+   The same names as tokens.css with dark values. Load it after tokens.css.
+   It applies when <html> carries data-theme="dark"; theme.js sets that from
+   the reader's choice or from the system setting.
+
+   What changes, and why:
+   - The page is near-black with a trace of the accent's hue. Cards are one
+     step lighter, so the hairline grid still reads as cards on a page.
+   - Hairlines get brighter, not darker. Depth still comes from lines.
+   - The accent is lifted until it clears 4.5:1 as text. A filled accent
+     button takes dark ink, because white on the lifted teal fails.
+   - Status and party colours become light inks on deep tints, so a tag
+     reads as the same tag in both themes.
+   - The toast inverts: a light slip on a dark page.
+   - Shadows deepen, since a 5% shadow vanishes on black.
+
+   Every text pairing clears 4.5:1. The README lists the ratios.
+--------------------------------------------------------------------------- */
+
+:root[data-theme='dark'] {
+	color-scheme: dark;
+
+	--c-canvas: #0d1416;
+	--c-surface: #141d20;
+	--c-surface-2: #1a2528;
+	--c-surface-3: #222f33;
+	--c-line: #26353a;
+	--c-line-soft: #1e2b2f;
+	--c-line-strong: #3a4d53;
+	--c-ink: #e6eef0;
+	--c-ink-2: #b3c2c6;
+	--c-muted: #94a6ab;
+	--c-faint: #879a9f;
+
+	--c-accent: #4fb3cc;
+	--c-accent-hover: #74c6da;
+	--c-accent-ink: #05222a;
+	--c-accent-soft: #11303a;
+	--c-accent-line: #25596b;
+	--c-accent-text: #7cc9dd;
+
+	--c-ok: #5cc98a;
+	--c-ok-soft: #11281b;
+	--c-ok-fill: #163322;
+	--c-ok-line: #2f6a47;
+	--c-warn: #e3b54a;
+	--c-warn-soft: #2a2210;
+	--c-warn-line: #6b5524;
+	--c-bad: #f0907c;
+	--c-bad-soft: #2c1814;
+	--c-bad-line: #7a4234;
+
+	--c-rep: #f08a80;
+	--c-rep-soft: #2e1715;
+	--c-dem: #82b1f5;
+	--c-dem-soft: #13233d;
+	--c-npa: #a8b3c0;
+	--c-npa-soft: #1f262f;
+	--c-oth: #e3b54a;
+	--c-oth-soft: #2a2210;
+
+	--c-badge: #b8432e;
+	--c-badge-ink: #ffffff;
+	--c-toast: #e6eef0;
+	--c-toast-ink: #0d1416;
+
+	--ring: 0 0 0 3px color-mix(in srgb, var(--c-focus) 38%, transparent);
+
+	--sh-sm: 0 1px 2px rgb(0 0 0 / 0.45);
+	--sh-active: 0 2px 10px rgb(0 0 0 / 0.5);
+	--sh-panel: 0 4px 16px rgb(0 0 0 / 0.55);
+	--sh-md: 0 12px 32px rgb(0 0 0 / 0.6);
+	--sh-dock: 0 -4px 16px rgb(0 0 0 / 0.55);
+
+	/* Daylight tiles turned to night: inverted, then the hue turned back so
+	   water stays blue and parks stay green. */
+	--map-tiles: invert(1) hue-rotate(180deg) saturate(0.3) brightness(0.85) contrast(0.9);
+}
+
+/* County Canvass in the dark: indigo on blue-gray. */
+:root[data-theme='dark'][data-accent='indigo'] {
+	--c-canvas: #0c0f14;
+	--c-surface: #151a21;
+	--c-surface-2: #1b212a;
+	--c-surface-3: #232b36;
+	--c-line: #2a3340;
+	--c-line-soft: #20272f;
+	--c-line-strong: #3a4655;
+	--c-ink: #eef2f7;
+	--c-ink-2: #c2ccd8;
+	--c-muted: #94a1b2;
+	--c-faint: #8b98a8;
+
+	--c-accent: #8f8bf0;
+	--c-accent-hover: #aba8f5;
+	--c-accent-ink: #100e3a;
+	--c-accent-soft: #1c1b42;
+	--c-accent-line: #3d3a86;
+	--c-accent-text: #b1aef7;
+
+	--c-toast: #eef2f7;
+	--c-toast-ink: #0c0f14;
+}

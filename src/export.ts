@@ -1,5 +1,4 @@
 import JSZip from 'jszip'
-import templateUrl from './assets/ExpenseReportForm_Template_US.xlsx?url'
 import { claimedAmount, sortReceipts } from './claim'
 import { receiptFileName, reportBaseName } from './naming'
 import { imageToPdf } from './pdf'
@@ -20,12 +19,13 @@ export const todayIso = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-/** One ZIP: the filled Excel report plus one correctly named PDF per receipt. */
-export async function buildExport(report: Report, receipts: Receipt[], settings: Settings): Promise<{ blob: Blob; name: string }> {
+/** One ZIP: the report filled into the chosen Excel template, plus one correctly named PDF per receipt. */
+export async function buildExport(report: Report, receipts: Receipt[], settings: Settings, template: Blob): Promise<{ blob: Blob; name: string }> {
   const sorted = sortReceipts(receipts)
-  const template = await (await fetch(templateUrl)).arrayBuffer()
+  const unpriced = sorted.flatMap((r, i) => (claimedAmount(r, settings.caps) === null ? [i + 1] : []))
+  if (unpriced.length) throw new Error(`Line${unpriced.length > 1 ? 's' : ''} ${unpriced.join(', ')} still need${unpriced.length > 1 ? '' : 's'} an exchange rate. Go online, or type the rate on the receipt.`)
   const xlsx = await fillTemplate(
-    template,
+    await template.arrayBuffer(),
     { name: settings.userName, title: report.name, created: todayIso(), from: report.from, to: report.to, projectRef: report.projectRef, invoiced: report.invoiced },
     sorted.map((r) => ({
       date: r.date,
@@ -33,7 +33,10 @@ export async function buildExport(report: Report, receipts: Receipt[], settings:
       description: r.description,
       projectRef: report.projectRef,
       type: r.type,
-      amount: claimedAmount(r, settings.caps),
+      amount: claimedAmount(r, settings.caps)!,
+      currency: r.currency,
+      rate: r.fx?.rate,
+      localAmount: r.currency === 'USD' ? undefined : r.amount,
     })),
   )
   const base = reportBaseName(report, settings.userName)

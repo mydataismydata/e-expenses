@@ -8,13 +8,13 @@ export default defineConfig({
       registerType: 'prompt',
       // The site sits behind Cloudflare Access, so the manifest must be fetched with credentials.
       useCredentials: true,
-      includeAssets: ['icon.svg', 'icon-192.png'],
+      includeAssets: ['icon.svg', 'icon-192.png', 'theme.js'],
       manifest: {
         name: 'Expense Reports',
         short_name: 'Expenses',
         description: 'Offline expense reports with receipt OCR, Excel and PDF export.',
-        theme_color: '#1f4e79',
-        background_color: '#f5f6f8',
+        theme_color: '#ffffff',
+        background_color: '#eff2f7',
         display: 'standalone',
         start_url: '/',
         icons: [
@@ -24,8 +24,8 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // Precache everything, including the OCR engine and model, so the app works fully offline after the first visit.
-        globPatterns: ['**/*.{js,css,html,svg,png,xlsx,mjs,gz,wasm}'],
+        // Precache everything, including the OCR engine, its model and the fonts, so the app works fully offline after the first visit.
+        globPatterns: ['**/*.{js,css,html,svg,png,mjs,gz,wasm,woff2}'],
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         navigateFallback: '/index.html',
       },

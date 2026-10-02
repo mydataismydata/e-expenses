@@ -15,7 +15,24 @@ export function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Props | 
   return el
 }
 
-export const money = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+/** "$1,234.50"; other currencies show their code, e.g. "€12.50" or "CHF 12.50". */
+export const money = (n: number, currency = 'USD') => n.toLocaleString('en-US', { style: 'currency', currency })
+
+/** Decimal places a currency uses: 2 for most, 0 for JPY, 3 for TND. */
+export const currencyDigits = (currency: string) => new Intl.NumberFormat('en-US', { style: 'currency', currency }).resolvedOptions().maximumFractionDigits ?? 2
+
+export const roundTo = (n: number, digits: number) => Math.round(n * 10 ** digits) / 10 ** digits
+
+/** Currencies listed first in pickers: US travel plus the template's own list. */
+const COMMON_CURRENCIES = ['USD', 'EUR', 'CAD', 'GBP', 'CHF', 'MXN', 'DKK', 'SEK', 'NOK', 'TND', 'MAD', 'JPY']
+const currencyNames = new Intl.DisplayNames(['en'], { type: 'currency' })
+
+/** [code, "EUR · Euro"] for the currency picker: the common ones, then the rest by code. */
+export function currencyOptions(): [string, string][] {
+  const all = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('currency') : COMMON_CURRENCIES
+  const rest = all.filter((c) => !COMMON_CURRENCIES.includes(c))
+  return [...COMMON_CURRENCIES, ...rest].map((c) => [c, `${c} · ${currencyNames.of(c) ?? c}`])
+}
 
 export function fmtDate(iso: string) {
   const [y, m, d] = iso.split('-').map(Number)
