@@ -6,8 +6,6 @@ export default defineConfig({
   plugins: [
     VitePWA({
       registerType: 'prompt',
-      // The site sits behind Cloudflare Access, so the manifest must be fetched with credentials.
-      useCredentials: true,
       includeAssets: ['icon.svg', 'icon-192.png', 'theme.js'],
       manifest: {
         name: 'Expense Reports',

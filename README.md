@@ -40,19 +40,16 @@ The rate is looked up when the receipt is entered. Offline, the receipt is saved
 
 `.working/` (sample report and receipt) is git-ignored because it holds personal data.
 
-## Deploy: private GitHub repo + Cloudflare Pages + Access
+## Deploy: GitHub + Cloudflare
 
-1. **GitHub** – create a private repository and push this folder (`git remote add origin …`, `git push -u origin main`).
-2. **Cloudflare Pages** – Dashboard → Workers & Pages → Create → Pages → Connect to Git. Authorise the Cloudflare GitHub app for the private repo, then:
-   - Build command: `npm run build`
-   - Build output directory: `dist`
-   - Environment variable: `NODE_VERSION` = `22`
-3. **Login gate (free, no card)** – `functions/_middleware.ts` is a Cloudflare Pages Function that asks for a username and password before serving anything. Set the credentials in the Pages project → Settings → Variables and Secrets (add them for both Production and Preview): `APP_USER` and `APP_PASSWORD` (type *Secret*). If either is missing the site returns 503 instead of serving. (Cloudflare Access is the alternative, but it needs a card on file.)
-4. **Install on the phone** – open the URL in Chrome on Android, sign in with the login, wait for the first load to finish (about 17 MB is cached for offline use), then menu → *Install app*. After that it works in airplane mode.
+Cloudflare (Workers Builds, project `e-expenses`) is connected to this repository. Every push to `main` builds the app and deploys it; the result shows as a check on the commit in GitHub. The build command is `npm run build` and the output folder is `dist`.
+
+There is no login. The site serves only the app code, which is public here anyway. Reports, receipts and Excel templates never leave the device.
+
+**Install on the phone** – open the URL in Chrome on Android, wait for the first load to finish (about 17 MB is cached for offline use), then menu → *Install app*. After that it works in airplane mode.
 
 Notes:
-- The manifest is requested with credentials (`crossorigin="use-credentials"`) so installation works behind the login.
-- Once installed the app is served from the on-device cache, so it never asks for the login again offline. Changing the password only affects new devices and updates. New versions download when you are online and show a "Reload" bar.
+- Once installed the app is served from the on-device cache. New versions download when you are online and show a "Reload" bar.
 - Clearing site data or uninstalling the app deletes the local database. Restore from a backup ZIP.
 
 ## Limits
