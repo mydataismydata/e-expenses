@@ -8,7 +8,7 @@ export async function homePage(): Promise<HTMLElement> {
   const rows = await Promise.all(
     reports.map(async (r) => {
       const receipts = await listReceipts(r.id)
-      const { total, pending } = totalClaimed(receipts, settings.caps)
+      const { total, pending } = totalClaimed(receipts, settings.caps, r.currency)
       return h(
         'a',
         { class: 'card pad stack tight', href: `#/report/${r.id}` },
@@ -18,7 +18,7 @@ export async function homePage(): Promise<HTMLElement> {
           'span',
           { class: 'spread' },
           h('span', { class: 'row' }, h('span', { class: 'muted' }, `${receipts.length} receipt${receipts.length === 1 ? '' : 's'}`), pending ? h('span', { class: 'tag warn' }, `${pending} rate${pending === 1 ? '' : 's'} pending`) : null),
-          h('span', { class: 'figure' }, money(total)),
+          h('span', { class: 'figure' }, money(total, r.currency)),
         ),
       )
     }),

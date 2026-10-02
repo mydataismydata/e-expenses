@@ -1,10 +1,10 @@
-import { claimedAmount, matchingReports, usdAmount } from '../claim'
-import { deleteReceipt, getReceipt, getSettings, listReports, saveReceipt, saveReport, uid } from '../db'
+import { claimedAmount, convertedAmount, matchingReports } from '../claim'
+import { deleteReceipt, getReceipt, getSettings, listReports, newReportCurrency, saveReceipt, saveReport, uid } from '../db'
 import { currencyDigits, currencyOptions, fmtDate, h, money, monthBounds, roundTo } from '../dom'
 import { isPdf, todayIso } from '../export'
 import { extractText, normaliseImage, renderPdfPage } from '../extract'
 import { guessFields } from '../parse'
-import { describeRate, fetchUsdRate, needsRate } from '../rates'
+import { describeRate, fetchRate, needsRate } from '../rates'
 import { EXPENSE_TYPES, type FxRate, type Receipt } from '../types'
 import { askFirst, card, field, go, input, notice, select, shell } from './shell'
 
@@ -51,7 +51,7 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
     oninput: () => {
       rateTouched = true
       const v = Number(rate.value)
-      fx = rate.value !== '' && v > 0 ? { rate: v, date: date.value, source: 'Manual' } : null
+      fx = rate.value !== '' && v > 0 ? { rate: v, to: target(), date: date.value, source: 'Manual' } : null
       showRate()
       refreshClaim()
     },
@@ -59,17 +59,23 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
   if (fx) rate.value = String(fx.rate)
   const rateLabel = h('span', { class: 'kicker' })
   const rateSource = h('span')
-  const rateUsd = h('span', { class: 'mono' })
+  const rateConverted = h('span', { class: 'mono' })
   const rateReset = h('span')
-  const rateField = h('div', { class: 'field' }, rateLabel, rate, h('span', { class: 'hint' }, rateSource, rateUsd, rateReset))
+  const rateField = h('div', { class: 'field' }, rateLabel, rate, h('span', { class: 'hint' }, rateSource, rateConverted, rateReset))
   const claimed = input({
     type: 'number', min: 0, step: '0.01', inputmode: 'decimal',
     oninput: () => { claimTouched = true; refreshClaim() },
   })
-  const reportSel = select({ onchange: () => { touched.add('report'); refreshReport() } })
+  const claimLabel = h('span', { class: 'kicker' })
+  const reportSel = select({ onchange: () => { touched.add('report'); refreshReport(); void updateRate() } })
   const newName = input({ type: 'text', placeholder: 'Name of the new report' })
   const newFrom = input({ type: 'date' })
   const newTo = input({ type: 'date' })
+  const defaultReportCurrency = newReportCurrency(reports)
+  const newCurrency = select(
+    { onchange: () => void updateRate() },
+    ...currencyOptions().map(([code, label]) => h('option', { value: code, selected: code === defaultReportCurrency }, label)),
+  )
   const reportBox = h('div', { class: 'stack' })
   const claimHint = h('span')
   const status = h('div')
@@ -77,27 +83,31 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
   const error = h('div')
 
   const num = () => (amount.value === '' ? NaN : Number(amount.value))
-  const foreign = () => currency.value !== 'USD'
-  const computedClaim = () => (Number.isFinite(num()) ? (claimedAmount({ amount: num(), type: type.value, claimedOverride: null, currency: currency.value, fx }, settings.caps) ?? NaN) : NaN)
+  /** The chosen report's currency: every amount is converted into it and claimed in it. */
+  const target = () => (reportSel.value === NEW_REPORT ? newCurrency.value : (reports.find((r) => r.id === reportSel.value)?.currency ?? defaultReportCurrency))
+  const foreign = () => currency.value !== target()
+  const computedClaim = () => (Number.isFinite(num()) ? (claimedAmount({ amount: num(), type: type.value, claimedOverride: null, currency: currency.value, fx }, settings.caps, target()) ?? NaN) : NaN)
 
   function refreshClaim() {
+    const to = target()
+    claimLabel.textContent = `Amount to claim (${to})`
     const auto = computedClaim()
     if (!claimTouched) claimed.value = Number.isFinite(auto) ? auto.toFixed(2) : ''
     const cap = settings.caps[type.value]
     const overridden = claimTouched && claimed.value !== '' && Number(claimed.value) !== auto
     const parts: string[] = []
     if (foreign() && !fx && !overridden) parts.push('Waiting for the exchange rate.')
-    if (cap !== undefined) parts.push(`${type.value} is limited to ${money(cap)}.`)
+    if (cap !== undefined) parts.push(`${type.value} is limited to ${money(cap, to)}.`)
     if (overridden) parts.push('Amount overridden by hand.')
-    if (!parts.length) parts.push(foreign() ? 'Defaults to the receipt total in US dollars.' : 'Defaults to the receipt total.')
+    if (!parts.length) parts.push(foreign() ? `Defaults to the receipt total converted to ${to}.` : 'Defaults to the receipt total.')
     claimHint.textContent = parts.join(' ')
-    const usd = foreign() && fx && Number.isFinite(num()) ? usdAmount({ amount: num(), currency: currency.value, fx }) : null
-    rateUsd.textContent = usd !== null ? ` ${money(num(), currency.value)} = ${money(usd)}.` : ''
+    const converted = foreign() && fx && Number.isFinite(num()) ? convertedAmount({ amount: num(), currency: currency.value, fx }, to) : null
+    rateConverted.textContent = converted !== null ? ` ${money(num(), currency.value)} = ${money(converted, to)}.` : ''
   }
 
   // ---- exchange rate: the published rate for the receipt date, unless typed by hand
   function showRate(message?: string) {
-    rateLabel.textContent = `Exchange rate (USD per 1 ${currency.value})`
+    rateLabel.textContent = `Exchange rate (${target()} per 1 ${currency.value})`
     rate.setAttribute('aria-label', rateLabel.textContent)
     if (message) rateSource.textContent = message
     else if (fx) rateSource.textContent = rateTouched ? 'Entered by hand.' : describeRate(fx, date.value, fmtDate)
@@ -113,6 +123,12 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
     rateField.hidden = !foreign()
     amount.step = String(10 ** -currencyDigits(currency.value))
     const mine = ++rateRequest
+    // A rate typed for another report currency no longer applies.
+    if (fx && fx.to !== target()) {
+      rateTouched = false
+      fx = null
+      rate.value = ''
+    }
     if (!foreign()) {
       fx = null
     } else if (rateTouched) {
@@ -121,19 +137,19 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
       fx = null
       rate.value = ''
       showRate('The rate is looked up once the date is known.')
-    } else if (initial && existing && fx && existing.currency === currency.value && !needsRate(existing, todayIso())) {
+    } else if (initial && fx && !needsRate({ currency: currency.value, fx, date: date.value }, target(), todayIso())) {
       showRate()
     } else {
       showRate('Looking up the rate…')
       try {
-        const got = await fetchUsdRate(currency.value, date.value)
+        const got = await fetchRate(currency.value, target(), date.value)
         if (mine !== rateRequest) return
         fx = got
         rate.value = got ? String(got.rate) : ''
         showRate(got ? undefined : 'No rate is published for this date yet. It is fetched later, or type it here.')
       } catch (e) {
         if (mine !== rateRequest) return
-        const keep = existing && existing.currency === currency.value && existing.date === date.value ? existing.fx : null
+        const keep = existing && existing.currency === currency.value && existing.date === date.value && existing.fx?.to === target() ? existing.fx : null
         fx = keep
         rate.value = keep ? String(keep.rate) : ''
         showRate(navigator.onLine ? `${e instanceof Error ? e.message : e} The rate is fetched later, or type it here.` : 'Offline. The rate is fetched when you are back online, or type it here.')
@@ -158,7 +174,11 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
       if (!newFrom.value) newFrom.value = b.from
       if (!newTo.value) newTo.value = b.to
       if (!newName.value && date.value) newName.value = `${date.value.slice(0, 7)} Expenses`
-      reportBox.append(field('New report name', newName), h('div', { class: 'pair' }, field('From', newFrom), field('To', newTo)))
+      reportBox.append(
+        field('New report name', newName),
+        h('div', { class: 'pair' }, field('From', newFrom), field('To', newTo)),
+        field('Report currency', newCurrency, 'Every receipt in the report is converted into this currency.'),
+      )
     } else if (!date.value) {
       reportBox.append(h('span', { class: 'hint muted small' }, 'The report is suggested once the date is known.'))
     } else if (matches.length > 1 && !reportSel.value) {
@@ -268,7 +288,7 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
     if (reportId === NEW_REPORT) {
       if (!newName.value.trim() || !newFrom.value || !newTo.value || newTo.value < newFrom.value) return fail('Give the new report a name and a valid date range.')
       reportId = uid()
-      await saveReport({ id: reportId, name: newName.value.trim(), from: newFrom.value, to: newTo.value, projectRef: '', invoiced: '', createdAt: Date.now() })
+      await saveReport({ id: reportId, name: newName.value.trim(), from: newFrom.value, to: newTo.value, projectRef: '', invoiced: '', createdAt: Date.now(), currency: newCurrency.value })
     }
     const auto = computedClaim()
     const claim = Number(claimed.value)
@@ -334,7 +354,7 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
     card('Amount', [
       h('div', { class: 'field' }, h('span', { class: 'kicker' }, 'Receipt total'), h('div', { class: 'amount-pair' }, amount, currency), h('span', { class: 'hint' }, 'As printed on the receipt, in its own currency.')),
       rateField,
-      field('Amount to claim (USD)', claimed, claimHint),
+      h('label', { class: 'field' }, claimLabel, claimed, h('span', { class: 'hint' }, claimHint)),
     ]),
     card('Report', [field('Report', reportSel), reportBox]),
     error,

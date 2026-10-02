@@ -1,15 +1,29 @@
-import { deleteReport, getReport, saveReport, uid } from '../db'
-import { h } from '../dom'
+import { deleteReport, getReport, listReceipts, listReports, newReportCurrency, saveReport, uid } from '../db'
+import { currencyOptions, h } from '../dom'
 import type { Report } from '../types'
-import { askFirst, card, field, go, input, notice, shell } from './shell'
+import { askFirst, card, field, go, input, notice, select, shell } from './shell'
 
 export async function reportFormPage(id?: string): Promise<HTMLElement> {
   const existing = id ? await getReport(id) : undefined
+  const startCurrency = existing?.currency ?? newReportCurrency(await listReports())
+  const receiptCount = existing ? (await listReceipts(existing.id)).length : 0
   const name = input({ type: 'text', required: true, value: existing?.name ?? '', placeholder: 'e.g. May–Dec 2025 expenses' })
   const from = input({ type: 'date', required: true, value: existing?.from ?? '' })
   const to = input({ type: 'date', required: true, value: existing?.to ?? '' })
   const projectRef = input({ type: 'text', value: existing?.projectRef ?? '' })
   const invoiced = input({ type: 'text', value: existing?.invoiced ?? '' })
+  const currencyHint = h('span', null, 'Every receipt is converted into this currency. Maximums in Settings apply in it too.')
+  const currency = select(
+    {
+      onchange: () => {
+        currencyHint.textContent =
+          receiptCount && currency.value !== startCurrency
+            ? `The ${receiptCount} receipt${receiptCount === 1 ? '' : 's'} in this report will be converted into ${currency.value}. Amounts to claim typed by hand stay as typed.`
+            : 'Every receipt is converted into this currency. Maximums in Settings apply in it too.'
+      },
+    },
+    ...currencyOptions().map(([code, label]) => h('option', { value: code, selected: code === startCurrency }, label)),
+  )
   const error = h('div')
 
   const form = h(
@@ -29,6 +43,7 @@ export async function reportFormPage(id?: string): Promise<HTMLElement> {
           projectRef: projectRef.value.trim(),
           invoiced: invoiced.value.trim(),
           createdAt: existing?.createdAt ?? Date.now(),
+          currency: currency.value,
         }
         await saveReport(report)
         go(`/report/${report.id}`)
@@ -37,6 +52,7 @@ export async function reportFormPage(id?: string): Promise<HTMLElement> {
     card('Report', [
       field('Report name', name, 'Printed as the Title on the Excel report.'),
       h('div', { class: 'pair' }, field('From', from), field('To', to)),
+      field('Currency', currency, currencyHint),
       h('div', { class: 'pair' }, field('Project reference', projectRef, 'Optional'), field('Invoiced', invoiced, 'Optional')),
     ]),
     error,

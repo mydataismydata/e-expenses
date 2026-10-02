@@ -2,11 +2,11 @@
 
 Offline-first web app (PWA) that builds expense reports from receipts.
 
-- Create reports by date range (name, from/to, optional project reference and "Invoiced").
+- Create reports by date range (name, from/to, currency, optional project reference and "Invoiced"). A new report starts in the currency of the last report you made, or USD.
 - Add a receipt by camera or PDF/JPG/PNG. Type, payee, place, date, amount, currency and invoice number are guessed (PDF text layer first, on-device OCR for photos and scanned PDFs). You always review the guesses.
-- Receipts can be in any currency. The amount is converted to US dollars with the exchange rate of the receipt date (see **Exchange rates**). You can type a different rate on any receipt.
+- Receipts can be in any currency. A receipt in the report's currency is used as printed. Any other is converted into the report's currency with the exchange rate of the receipt date (see **Exchange rates**). You can type a different rate on any receipt.
 - The receipt goes into the report whose dates contain the receipt date. If several reports overlap that date it asks which one; if none match it offers to create one.
-- Per-type maximum claim (Settings), in US dollars. Defaults: Internet fees $70, Phone fees $40. The receipt total is kept; the claimed amount is capped after conversion, and can be overridden on a receipt.
+- Per-type maximum claim (Settings). Defaults: Internet fees 70, Phone fees 40. A maximum is an amount in each report's own currency: 70 is $70 on a USD report and €70 on a EUR report. The receipt total is kept; the claimed amount is capped after conversion, and can be overridden on a receipt.
 - **Export** gives one ZIP containing the filled Excel template and one PDF per receipt named `NN - YYYY-MM <invoice number or payee>.pdf`, where `NN` is the row on the report. JPG/PNG photos are wrapped in a PDF.
 - The Excel template is not part of the app. Add one or more in **Settings → Excel templates** (or from a report's export box) with a file picker, for example the US and the French form. They are kept on the device and in backups. Each report can use a different template; the first one added is the default.
 - The look is the Clean grids design template in its indigo palette, with light and dark themes (**Settings → Appearance**). See `src/styles/clean-grids/README.md`.
@@ -28,15 +28,17 @@ npm run preview    # serve dist/ (service worker active)
 
 Templates never go in this repository (`templates/` and `*.xlsx` are git-ignored). The app takes them from the user with a file picker and stores them in IndexedDB.
 
-A template is filled by editing the sheet XML directly, so formatting, the table, the drop-downs and the logo are untouched. More than 20 receipts grow the table and push the totals/signature block down. A file is accepted only if it has the original layout: header cells in rows 3–4, the expense table at `A6:J27` with its total in `G27`. Each row gets the claimed US dollars in **Amount $**; a foreign receipt also fills **Currency**, **Rate** (US dollars per unit) and **Amount (local currency)**.
+A template is filled by editing the sheet XML directly, so formatting, the table, the drop-downs and the logo are untouched. More than 20 receipts grow the table and push the totals/signature block down. A file is accepted only if it has the original layout: header cells in rows 3–4, the expense table at `A6:J27` with its total in `G27`. Each row gets the claimed amount, in the report's currency, in the amount column, and the receipt's currency in **Currency**. A converted receipt also fills **Rate** (report currency per unit of the receipt's currency) and **Amount (local currency)**.
+
+Pick a template whose amount column matches the report's currency: the US form formats amounts with "$". The report page warns when the template's symbol and the report's currency differ.
 
 To run the Excel tests, copy one or more templates into `templates/`. `npm test` fills each of them; without any, those tests are skipped.
 
 ### Exchange rates
 
-Rates come from [Frankfurter](https://frankfurter.dev) (free, no key, CORS enabled). For the ~30 currencies the European Central Bank quotes, the app uses the ECB's daily reference rate for the receipt date. Other currencies get Frankfurter's average of central-bank rates for that date. A weekend or holiday gets the last rate published before it.
+Rates come from [Frankfurter](https://frankfurter.dev) (free, no key, CORS enabled). When the European Central Bank quotes both the receipt's and the report's currency (~30 currencies), the app uses the ECB's daily reference rate for the receipt date. Other pairs get Frankfurter's average of central-bank rates for that date. A weekend or holiday gets the last rate published before it.
 
-The rate is looked up when the receipt is entered. Offline, the receipt is saved with its rate pending; the report fetches it next time it is opened online, and export asks for it first. A receipt saved before that day's rate was published is looked up again for a week. Rates typed by hand are never replaced.
+The rate is looked up when the receipt is entered. Offline, the receipt is saved with its rate pending; the report fetches it next time it is opened online, and export asks for it first. A receipt saved before that day's rate was published is looked up again for a week. Rates typed by hand are kept until the report's currency changes. Changing a report's currency, or moving a receipt to a report in another currency, converts the receipts again; amounts to claim typed by hand stay as typed.
 
 `.working/` (sample report and receipt) is git-ignored because it holds personal data.
 
@@ -54,5 +56,4 @@ Notes:
 
 ## Limits
 
-- Reports are in US dollars. Other currencies are converted, never the other way round.
 - OCR is best-effort: dates and totals are usually right, payee and place less so. Check the pre-filled fields. A receipt that names a non-US currency (€, £, EUR, CHF…) is read with day-first dates and decimal commas.

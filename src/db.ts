@@ -21,10 +21,19 @@ const dbp = openDB<Schema>('expense-reports', 2, {
 
 export const uid = () => crypto.randomUUID()
 
+/** Reports made before currencies existed are in USD. */
+export const withReportDefaults = (r: Report): Report => ({ ...r, currency: r.currency || 'USD' })
+
+/** Currency for a new report: that of the report created last, else USD. */
+export const newReportCurrency = (reports: Report[]) => [...reports].sort((a, b) => b.createdAt - a.createdAt)[0]?.currency ?? 'USD'
+
 export async function listReports(): Promise<Report[]> {
-  return (await (await dbp).getAll('reports')).sort((a, b) => b.from.localeCompare(a.from))
+  return (await (await dbp).getAll('reports')).map(withReportDefaults).sort((a, b) => b.from.localeCompare(a.from))
 }
-export const getReport = async (id: string) => (await dbp).get('reports', id)
+export async function getReport(id: string) {
+  const r = await (await dbp).get('reports', id)
+  return r && withReportDefaults(r)
+}
 export const saveReport = async (r: Report) => void (await (await dbp).put('reports', r))
 
 export async function deleteReport(id: string) {
@@ -35,8 +44,8 @@ export async function deleteReport(id: string) {
   await tx.done
 }
 
-/** Receipts saved before currencies existed are in USD. */
-export const withDefaults = (r: Receipt): Receipt => ({ ...r, currency: r.currency || 'USD', fx: r.fx ?? null })
+/** Receipts saved before currencies existed are in USD; rates saved before report currencies existed convert into USD. */
+export const withDefaults = (r: Receipt): Receipt => ({ ...r, currency: r.currency || 'USD', fx: r.fx ? { ...r.fx, to: r.fx.to || 'USD' } : null })
 
 export const listReceipts = async (reportId: string) => (await (await dbp).getAllFromIndex('receipts', 'reportId', reportId)).map(withDefaults)
 export async function getReceipt(id: string) {

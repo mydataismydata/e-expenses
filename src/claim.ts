@@ -4,30 +4,34 @@ const round2 = (n: number) => Math.round(n * 100) / 100
 
 type Amounts = Pick<Receipt, 'amount' | 'type' | 'claimedOverride'> & { currency?: string; fx?: FxRate | null }
 
-/** The receipt total in US dollars, or null while a foreign receipt has no exchange rate yet. */
-export function usdAmount(r: Pick<Amounts, 'amount' | 'currency' | 'fx'>): number | null {
-  if (!r.currency || r.currency === 'USD') return round2(r.amount)
-  return r.fx ? round2(r.amount * r.fx.rate) : null
+/**
+ * The receipt total in the report's currency: as printed when the receipt is already
+ * in that currency, else converted. Null while the exchange rate is unknown.
+ */
+export function convertedAmount(r: Pick<Amounts, 'amount' | 'currency' | 'fx'>, reportCurrency: string): number | null {
+  if ((r.currency || 'USD') === reportCurrency) return round2(r.amount)
+  return r.fx && r.fx.to === reportCurrency ? round2(r.amount * r.fx.rate) : null
 }
 
 /**
- * Amount that goes on the expense report, in US dollars: the override, else the
- * USD total limited by the type's maximum. Null while the exchange rate is unknown.
+ * Amount that goes on the expense report, in the report's currency: the override,
+ * else the converted total limited by the type's maximum. Maximums are plain amounts
+ * in the report's currency. Null while the exchange rate is unknown.
  */
-export function claimedAmount(r: Amounts, caps: Settings['caps']): number | null {
+export function claimedAmount(r: Amounts, caps: Settings['caps'], reportCurrency: string): number | null {
   if (r.claimedOverride !== null) return round2(r.claimedOverride)
-  const usd = usdAmount(r)
-  if (usd === null) return null
+  const total = convertedAmount(r, reportCurrency)
+  if (total === null) return null
   const cap = caps[r.type]
-  return round2(cap !== undefined && cap >= 0 ? Math.min(usd, cap) : usd)
+  return round2(cap !== undefined && cap >= 0 ? Math.min(total, cap) : total)
 }
 
 /** Sum of the known claims, and how many receipts still wait for a rate. */
-export function totalClaimed(list: Amounts[], caps: Settings['caps']): { total: number; pending: number } {
+export function totalClaimed(list: Amounts[], caps: Settings['caps'], reportCurrency: string): { total: number; pending: number } {
   let total = 0
   let pending = 0
   for (const r of list) {
-    const c = claimedAmount(r, caps)
+    const c = claimedAmount(r, caps, reportCurrency)
     if (c === null) pending++
     else total += c
   }

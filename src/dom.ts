@@ -18,6 +18,10 @@ export function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Props | 
 /** "$1,234.50"; other currencies show their code, e.g. "€12.50" or "CHF 12.50". */
 export const money = (n: number, currency = 'USD') => n.toLocaleString('en-US', { style: 'currency', currency })
 
+/** The short symbol a currency is written with: "$" for USD and CAD, "€", "£", or the code (CHF). */
+export const currencySymbol = (currency: string) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency, currencyDisplay: 'narrowSymbol' }).formatToParts(0).find((p) => p.type === 'currency')?.value ?? currency
+
 /** Decimal places a currency uses: 2 for most, 0 for JPY, 3 for TND. */
 export const currencyDigits = (currency: string) => new Intl.NumberFormat('en-US', { style: 'currency', currency }).resolvedOptions().maximumFractionDigits ?? 2
 

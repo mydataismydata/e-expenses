@@ -2,9 +2,9 @@ import type { FxRate, Receipt } from './types'
 
 /**
  * Exchange rates come from Frankfurter (https://frankfurter.dev), a free service
- * without keys. The ECB's daily reference rate is used for the ~30 currencies the
- * ECB quotes. Any other currency gets Frankfurter's blend of central-bank rates
- * for the same day. A weekend or holiday gets the last rate published before it.
+ * without keys. The ECB's daily reference rate is used when the ECB quotes both
+ * currencies (~30 of them). Any other pair gets Frankfurter's blend of central-bank
+ * rates for the same day. A weekend or holiday gets the last rate published before it.
  */
 const API = 'https://api.frankfurter.dev/v2/rates'
 
@@ -16,30 +16,30 @@ interface Row {
 
 const cache = new Map<string, Promise<FxRate | null>>()
 
-async function query(currency: string, date: string, ecbOnly: boolean, fetcher: typeof fetch): Promise<Row | undefined> {
-  const url = `${API}?base=${encodeURIComponent(currency)}&quotes=USD&date=${date}${ecbOnly ? '&providers=ECB' : ''}`
+async function query(from: string, to: string, date: string, ecbOnly: boolean, fetcher: typeof fetch): Promise<Row | undefined> {
+  const url = `${API}?base=${encodeURIComponent(from)}&quotes=${encodeURIComponent(to)}&date=${date}${ecbOnly ? '&providers=ECB' : ''}`
   let res: Response
   try {
     res = await fetcher(url)
   } catch {
     throw new Error('Could not reach the exchange-rate service.')
   }
-  if (res.status === 422) throw new Error(`No exchange rates are published for ${currency}.`)
+  if (res.status === 422) throw new Error(`No exchange rates are published between ${from} and ${to}.`)
   if (!res.ok) throw new Error(`The exchange-rate service answered ${res.status}.`)
   const rows = (await res.json()) as Row[]
-  return rows.find((r) => r.quote === 'USD' && r.rate > 0)
+  return rows.find((r) => r.quote === to && r.rate > 0)
 }
 
-/** US dollars for one unit of `currency` on `date`, or null when no rate is published yet. */
-export function fetchUsdRate(currency: string, date: string, fetcher: typeof fetch = fetch): Promise<FxRate | null> {
-  const key = `${currency}|${date}`
+/** Units of `to` for one unit of `from` on `date`, or null when no rate is published yet. */
+export function fetchRate(from: string, to: string, date: string, fetcher: typeof fetch = fetch): Promise<FxRate | null> {
+  const key = `${from}|${to}|${date}`
   let p = cache.get(key)
   if (!p) {
     p = (async () => {
-      const ecb = await query(currency, date, true, fetcher)
-      if (ecb) return { rate: ecb.rate, date: ecb.date, source: 'ECB' }
-      const blend = await query(currency, date, false, fetcher)
-      return blend ? { rate: blend.rate, date: blend.date, source: 'Central banks' } : null
+      const ecb = await query(from, to, date, true, fetcher)
+      if (ecb) return { rate: ecb.rate, to, date: ecb.date, source: 'ECB' }
+      const blend = await query(from, to, date, false, fetcher)
+      return blend ? { rate: blend.rate, to, date: blend.date, source: 'Central banks' } : null
     })()
     // Failures are not remembered, so the next attempt asks again.
     p.catch(() => cache.delete(key))
@@ -52,13 +52,15 @@ const DAY = 86400000
 const daysBetween = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / DAY)
 
 /**
- * A receipt needs a (new) rate when it has none, or when its rate is older than its
- * date and the date is recent: that day's rate may not have been published yet when
- * the receipt was saved. Rates typed by hand are left alone.
+ * A receipt in another currency than its report needs a (new) rate when it has none,
+ * when its rate converts into another currency (the report's currency changed, or it
+ * moved report), or when its rate is older than its date and the date is recent: that
+ * day's rate may not have been published yet when the receipt was saved. Rates typed
+ * by hand for the right currency are left alone.
  */
-export function needsRate(r: Pick<Receipt, 'currency' | 'fx' | 'date'>, today: string): boolean {
-  if (r.currency === 'USD') return false
-  if (!r.fx) return true
+export function needsRate(r: Pick<Receipt, 'currency' | 'fx' | 'date'>, reportCurrency: string, today: string): boolean {
+  if (r.currency === reportCurrency) return false
+  if (!r.fx || r.fx.to !== reportCurrency) return true
   return r.fx.source !== 'Manual' && r.fx.date < r.date && daysBetween(r.date, today) <= 7
 }
 
@@ -68,6 +70,7 @@ export function needsRate(r: Pick<Receipt, 'currency' | 'fx' | 'date'>, today: s
  */
 export async function refreshRates<T extends Pick<Receipt, 'currency' | 'fx' | 'date'>>(
   receipts: T[],
+  reportCurrency: string,
   today: string,
   save: (r: T) => Promise<void>,
   fetcher: typeof fetch = fetch,
@@ -75,10 +78,10 @@ export async function refreshRates<T extends Pick<Receipt, 'currency' | 'fx' | '
   let updated = 0
   let error: string | undefined
   for (const r of receipts) {
-    if (!needsRate(r, today)) continue
+    if (!needsRate(r, reportCurrency, today)) continue
     try {
-      const fx = await fetchUsdRate(r.currency, r.date, fetcher)
-      if (fx && (fx.date !== r.fx?.date || fx.rate !== r.fx?.rate || fx.source !== r.fx?.source)) {
+      const fx = await fetchRate(r.currency, reportCurrency, r.date, fetcher)
+      if (fx && (fx.to !== r.fx?.to || fx.date !== r.fx?.date || fx.rate !== r.fx?.rate || fx.source !== r.fx?.source)) {
         r.fx = fx
         await save(r)
         updated++
@@ -87,7 +90,7 @@ export async function refreshRates<T extends Pick<Receipt, 'currency' | 'fx' | '
       error ??= e instanceof Error ? e.message : String(e)
     }
   }
-  return { updated, missing: receipts.filter((r) => r.currency !== 'USD' && !r.fx).length, error }
+  return { updated, missing: receipts.filter((r) => r.currency !== reportCurrency && r.fx?.to !== reportCurrency).length, error }
 }
 
 /** One line on where a rate came from, for hints and the report view. */

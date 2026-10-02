@@ -123,8 +123,8 @@ export async function settingsPage(): Promise<HTMLElement> {
     saveForm(
       'Maximum claim per expense type',
       [
-        h('p', { class: 'muted' }, 'When a type has a maximum, the claimed amount is the receipt total in US dollars or the maximum, whichever is lower. Leave blank for no limit. You can still override the amount on a receipt.'),
-        h('div', { class: 'caps' }, ...capInputs.map(({ type, input }) => field(`${type} ($)`, input))),
+        h('p', { class: 'muted' }, "When a type has a maximum, the claimed amount is the receipt total or the maximum, whichever is lower. Maximums are in each report's own currency: 70 means $70 on a USD report and €70 on a EUR report. Leave blank for no limit. You can still override the amount on a receipt."),
+        h('div', { class: 'caps' }, ...capInputs.map(({ type, input }) => field(type, input))),
       ],
       'Save maximums',
       capsStatus,

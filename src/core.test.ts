@@ -1,11 +1,11 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import JSZip from 'jszip'
-import { claimedAmount, matchingReports, sortReceipts, totalClaimed } from './claim'
+import { claimedAmount, convertedAmount, matchingReports, sortReceipts, totalClaimed } from './claim'
 import { receiptFileName, reportBaseName, userTag } from './naming'
 import { guessCurrency, guessFields } from './parse'
-import { describeRate, fetchUsdRate, needsRate, refreshRates } from './rates'
-import { checkTemplate, fillTemplate, excelDate, type SheetRow } from './xlsx'
+import { describeRate, fetchRate, needsRate, refreshRates } from './rates'
+import { checkTemplate, fillTemplate, excelDate, templateAmountSymbol, type SheetRow } from './xlsx'
 
 const STARLINK = `Attn: Jane Doe
 12 Example Ln
@@ -93,18 +93,29 @@ describe('naming', () => {
 describe('claims', () => {
   const caps = { 'Internet fees': 70 }
   it('caps by type and honours overrides', () => {
-    expect(claimedAmount({ amount: 120, type: 'Internet fees', claimedOverride: null }, caps)).toBe(70)
-    expect(claimedAmount({ amount: 50, type: 'Internet fees', claimedOverride: null }, caps)).toBe(50)
-    expect(claimedAmount({ amount: 120, type: 'Internet fees', claimedOverride: 90 }, caps)).toBe(90)
-    expect(claimedAmount({ amount: 120, type: 'Taxi', claimedOverride: null }, caps)).toBe(120)
+    expect(claimedAmount({ amount: 120, type: 'Internet fees', claimedOverride: null }, caps, 'USD')).toBe(70)
+    expect(claimedAmount({ amount: 50, type: 'Internet fees', claimedOverride: null }, caps, 'USD')).toBe(50)
+    expect(claimedAmount({ amount: 120, type: 'Internet fees', claimedOverride: 90 }, caps, 'USD')).toBe(90)
+    expect(claimedAmount({ amount: 120, type: 'Taxi', claimedOverride: null }, caps, 'USD')).toBe(120)
   })
-  it('converts foreign receipts before applying the cap', () => {
-    const fx = { rate: 1.1214, date: '2025-05-14', source: 'ECB' }
-    expect(claimedAmount({ amount: 100, type: 'Taxi', claimedOverride: null, currency: 'EUR', fx }, caps)).toBe(112.14)
-    expect(claimedAmount({ amount: 100, type: 'Internet fees', claimedOverride: null, currency: 'EUR', fx }, caps)).toBe(70)
-    expect(claimedAmount({ amount: 100, type: 'Taxi', claimedOverride: null, currency: 'EUR', fx: null }, caps)).toBeNull()
-    expect(claimedAmount({ amount: 100, type: 'Taxi', claimedOverride: 50, currency: 'EUR', fx: null }, caps)).toBe(50)
-    expect(totalClaimed([{ amount: 10, type: 'Taxi', claimedOverride: null }, { amount: 5, type: 'Taxi', claimedOverride: null, currency: 'EUR', fx: null }], caps)).toEqual({ total: 10, pending: 1 })
+  it('converts into the report currency before applying the cap', () => {
+    const fx = { rate: 1.1214, to: 'USD', date: '2025-05-14', source: 'ECB' }
+    expect(claimedAmount({ amount: 100, type: 'Taxi', claimedOverride: null, currency: 'EUR', fx }, caps, 'USD')).toBe(112.14)
+    expect(claimedAmount({ amount: 100, type: 'Internet fees', claimedOverride: null, currency: 'EUR', fx }, caps, 'USD')).toBe(70)
+    expect(claimedAmount({ amount: 100, type: 'Taxi', claimedOverride: null, currency: 'EUR', fx: null }, caps, 'USD')).toBeNull()
+    expect(claimedAmount({ amount: 100, type: 'Taxi', claimedOverride: 50, currency: 'EUR', fx: null }, caps, 'USD')).toBe(50)
+    expect(totalClaimed([{ amount: 10, type: 'Taxi', claimedOverride: null }, { amount: 5, type: 'Taxi', claimedOverride: null, currency: 'EUR', fx: null }], caps, 'USD')).toEqual({ total: 10, pending: 1 })
+  })
+  it('works for a report in another currency, with maximums in that currency', () => {
+    const toEur = { rate: 0.8917, to: 'EUR', date: '2025-05-14', source: 'ECB' }
+    // A EUR receipt on a EUR report needs no rate; the cap of 70 means €70.
+    expect(claimedAmount({ amount: 50, type: 'Taxi', claimedOverride: null, currency: 'EUR', fx: null }, caps, 'EUR')).toBe(50)
+    expect(claimedAmount({ amount: 90, type: 'Internet fees', claimedOverride: null, currency: 'EUR', fx: null }, caps, 'EUR')).toBe(70)
+    // A USD receipt on a EUR report is converted into euros.
+    expect(claimedAmount({ amount: 100, type: 'Taxi', claimedOverride: null, currency: 'USD', fx: toEur }, caps, 'EUR')).toBe(89.17)
+    // A rate into dollars does not convert into euros: the report changed currency.
+    expect(claimedAmount({ amount: 100, type: 'Taxi', claimedOverride: null, currency: 'GBP', fx: { ...toEur, to: 'USD' } }, caps, 'EUR')).toBeNull()
+    expect(convertedAmount({ amount: 100, currency: 'USD', fx: null }, 'USD')).toBe(100)
   })
   it('sorts by date then entry order and finds overlapping reports', () => {
     expect(sortReceipts([{ date: '2025-02-01', addedAt: 2 }, { date: '2025-01-01', addedAt: 3 }, { date: '2025-02-01', addedAt: 1 }]).map((r) => r.addedAt)).toEqual([3, 1, 2])
@@ -124,29 +135,40 @@ describe('exchange rates', () => {
       if (url.includes('base=EUR')) return answer([{ date: '2025-05-16', base: 'EUR', quote: 'USD', rate: 1.1194 }])
       return answer(url.includes('providers=ECB') ? [] : [{ date: '2025-05-16', base: 'TND', quote: 'USD', rate: 0.3314 }])
     }) as typeof fetch
-    expect(await fetchUsdRate('EUR', '2025-05-17', fetcher)).toEqual({ rate: 1.1194, date: '2025-05-16', source: 'ECB' })
-    expect(await fetchUsdRate('TND', '2025-05-17', fetcher)).toEqual({ rate: 0.3314, date: '2025-05-16', source: 'Central banks' })
+    expect(await fetchRate('EUR', 'USD', '2025-05-17', fetcher)).toEqual({ rate: 1.1194, to: 'USD', date: '2025-05-16', source: 'ECB' })
+    expect(await fetchRate('TND', 'USD', '2025-05-17', fetcher)).toEqual({ rate: 0.3314, to: 'USD', date: '2025-05-16', source: 'Central banks' })
     expect(urls).toHaveLength(3)
     expect(urls[0]).toBe('https://api.frankfurter.dev/v2/rates?base=EUR&quotes=USD&date=2025-05-17&providers=ECB')
+  })
+
+  it('converts into any report currency', async () => {
+    const urls: string[] = []
+    const fetcher = ((url: string) => (urls.push(url), answer([{ date: '2025-05-14', base: 'USD', quote: 'EUR', rate: 0.8917 }]))) as typeof fetch
+    expect(await fetchRate('USD', 'EUR', '2025-05-14', fetcher)).toEqual({ rate: 0.8917, to: 'EUR', date: '2025-05-14', source: 'ECB' })
+    expect(urls[0]).toBe('https://api.frankfurter.dev/v2/rates?base=USD&quotes=EUR&date=2025-05-14&providers=ECB')
   })
 
   it('reports unknown currencies and does not cache failures', async () => {
     let calls = 0
     const fetcher = (() => (++calls, answer({ status: 422, message: 'invalid currency: XYZ' }, 422))) as typeof fetch
-    await expect(fetchUsdRate('XYZ', '2025-05-14', fetcher)).rejects.toThrow('No exchange rates are published for XYZ.')
-    await expect(fetchUsdRate('XYZ', '2025-05-14', fetcher)).rejects.toThrow()
+    await expect(fetchRate('XYZ', 'USD', '2025-05-14', fetcher)).rejects.toThrow('No exchange rates are published between XYZ and USD.')
+    await expect(fetchRate('XYZ', 'USD', '2025-05-14', fetcher)).rejects.toThrow()
     expect(calls).toBe(2)
   })
 
   it('knows which receipts need a rate', () => {
-    const fx = (date: string, source = 'ECB') => ({ rate: 1.1, date, source })
-    expect(needsRate({ currency: 'USD', fx: null, date: '2025-05-14' }, '2025-05-14')).toBe(false)
-    expect(needsRate({ currency: 'EUR', fx: null, date: '2025-05-14' }, '2025-05-14')).toBe(true)
+    const fx = (date: string, source = 'ECB', to = 'USD') => ({ rate: 1.1, to, date, source })
+    expect(needsRate({ currency: 'USD', fx: null, date: '2025-05-14' }, 'USD', '2025-05-14')).toBe(false)
+    expect(needsRate({ currency: 'EUR', fx: null, date: '2025-05-14' }, 'USD', '2025-05-14')).toBe(true)
+    // Already in the report's currency: nothing to convert.
+    expect(needsRate({ currency: 'EUR', fx: null, date: '2025-05-14' }, 'EUR', '2025-05-14')).toBe(false)
     // Saved before that day's rate was out: ask again for a week.
-    expect(needsRate({ currency: 'EUR', fx: fx('2025-05-13'), date: '2025-05-14' }, '2025-05-15')).toBe(true)
-    expect(needsRate({ currency: 'EUR', fx: fx('2025-05-13'), date: '2025-05-14' }, '2025-06-15')).toBe(false)
-    expect(needsRate({ currency: 'EUR', fx: fx('2025-05-13', 'Manual'), date: '2025-05-14' }, '2025-05-15')).toBe(false)
-    expect(needsRate({ currency: 'EUR', fx: fx('2025-05-14'), date: '2025-05-14' }, '2025-05-15')).toBe(false)
+    expect(needsRate({ currency: 'EUR', fx: fx('2025-05-13'), date: '2025-05-14' }, 'USD', '2025-05-15')).toBe(true)
+    expect(needsRate({ currency: 'EUR', fx: fx('2025-05-13'), date: '2025-05-14' }, 'USD', '2025-06-15')).toBe(false)
+    expect(needsRate({ currency: 'EUR', fx: fx('2025-05-13', 'Manual'), date: '2025-05-14' }, 'USD', '2025-05-15')).toBe(false)
+    expect(needsRate({ currency: 'EUR', fx: fx('2025-05-14'), date: '2025-05-14' }, 'USD', '2025-05-15')).toBe(false)
+    // The report now uses another currency, even for a rate typed by hand.
+    expect(needsRate({ currency: 'GBP', fx: fx('2025-05-14', 'Manual', 'USD'), date: '2025-05-14' }, 'EUR', '2025-06-15')).toBe(true)
   })
 
   it('fills missing rates and saves only what changed', async () => {
@@ -156,15 +178,15 @@ describe('exchange rates', () => {
       { currency: 'GBP', fx: null, date: '2025-05-15' },
       { currency: 'USD', fx: null, date: '2025-05-15' },
     ]
-    expect(await refreshRates(list, '2025-05-20', async (r) => void saved.push(r), fetcher)).toEqual({ updated: 1, missing: 0, error: undefined })
-    expect(list[0].fx).toEqual({ rate: 1.33, date: '2025-05-15', source: 'ECB' })
+    expect(await refreshRates(list, 'USD', '2025-05-20', async (r) => void saved.push(r), fetcher)).toEqual({ updated: 1, missing: 0, error: undefined })
+    expect(list[0].fx).toEqual({ rate: 1.33, to: 'USD', date: '2025-05-15', source: 'ECB' })
     expect(saved).toHaveLength(1)
   })
 
   it('says where a rate came from', () => {
     const fmt = (d: string) => d
-    expect(describeRate({ rate: 1, date: '2025-05-16', source: 'ECB' }, '2025-05-17', fmt)).toBe('ECB reference rate of 2025-05-16, the last one published before 2025-05-17.')
-    expect(describeRate({ rate: 1, date: '2025-05-17', source: 'Central banks' }, '2025-05-17', fmt)).toBe('Average central-bank rate for 2025-05-17.')
+    expect(describeRate({ rate: 1, to: 'USD', date: '2025-05-16', source: 'ECB' }, '2025-05-17', fmt)).toBe('ECB reference rate of 2025-05-16, the last one published before 2025-05-17.')
+    expect(describeRate({ rate: 1, to: 'USD', date: '2025-05-17', source: 'Central banks' }, '2025-05-17', fmt)).toBe('Average central-bank rate for 2025-05-17.')
   })
 })
 
@@ -196,6 +218,11 @@ describe.each(templates)('xlsx with %s', (file) => {
 
   it('passes the template check', async () => {
     expect(await checkTemplate(template)).toBeNull()
+  })
+
+  it('reads the currency symbol of the amount column', async () => {
+    // The US form formats amounts as "$"; a French form is expected to show €.
+    expect(['$', '€']).toContain(await templateAmountSymbol(template))
   })
 
   it('fills the template and keeps the table intact', async () => {

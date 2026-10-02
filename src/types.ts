@@ -21,7 +21,7 @@ export const EXPENSE_TYPES = [
   'Train tickets',
 ] as const
 
-/** Maximum claimable amount per expense type, seeded from the existing report. */
+/** Maximum claimable amount per expense type, seeded from the existing report. Applies in each report's own currency. */
 export const DEFAULT_CAPS: Record<string, number> = {
   'Internet fees': 70,
   'Phone fees': 40,
@@ -38,12 +38,16 @@ export interface Report {
   createdAt: number
   /** Excel template used for the export; empty or missing means the default from Settings. */
   templateId?: string
+  /** ISO 4217 code every receipt is converted into. Reports made before currencies existed are USD. */
+  currency: string
 }
 
-/** Exchange rate from a receipt's currency into US dollars. */
+/** Exchange rate from a receipt's currency into its report's currency. */
 export interface FxRate {
-  /** US dollars for one unit of the receipt currency. */
+  /** Units of `to` for one unit of the receipt currency. */
   rate: number
+  /** The currency the rate converts into. Rates saved before report currencies existed are USD. */
+  to: string
   /** Date of the published rate: the receipt date, or the last business day before it. */
   date: string
   /** 'ECB', 'Central banks' (Frankfurter's blend) or 'Manual'. */
@@ -64,9 +68,9 @@ export interface Receipt {
   amount: number
   /** ISO 4217 code of `amount`. Receipts saved before currencies existed are USD. */
   currency: string
-  /** Rate into USD for a non-USD receipt, or null until it is known. Always null for USD. */
+  /** Rate into the report's currency, or null until it is known. Null when the receipt is already in that currency. */
   fx: FxRate | null
-  /** Manually entered claim in USD that overrides the cap rule, or null. */
+  /** Manually entered claim, in the report's currency, that overrides the cap rule, or null. */
   claimedOverride: number | null
   /** PDF, or a normalised JPEG. */
   file: Blob
@@ -85,6 +89,7 @@ export interface Template {
 
 export interface Settings {
   userName: string
+  /** Maximum claim per expense type, in each report's own currency. */
   caps: Record<string, number>
   /** Template used when a report does not pick one; empty when none has been added. */
   defaultTemplateId: string

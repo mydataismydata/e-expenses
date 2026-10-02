@@ -16,13 +16,13 @@ export interface SheetRow {
   description: string
   projectRef: string
   type: string
-  /** Claimed amount in US dollars. */
+  /** Claimed amount in the report's currency. */
   amount: number
-  /** Receipt currency. USD (or none) leaves Rate and the local amount empty. */
+  /** Receipt currency; defaults to USD. */
   currency?: string
-  /** US dollars per unit of `currency`. */
+  /** Report currency per unit of `currency`; only for a converted receipt. */
   rate?: number
-  /** Receipt total in `currency`. */
+  /** Receipt total in `currency`; only for a converted receipt. */
   localAmount?: number
 }
 
@@ -85,6 +85,24 @@ export async function checkTemplate(bytes: ArrayBuffer | Uint8Array): Promise<st
   return null
 }
 
+/**
+ * The currency symbol the template's amount column (G7) is formatted with, e.g. "$"
+ * or "€", or undefined when its format shows none.
+ */
+export async function templateAmountSymbol(bytes: ArrayBuffer | Uint8Array): Promise<string | undefined> {
+  const zip = await JSZip.loadAsync(bytes)
+  const sheet = await zip.file(SHEET)?.async('string')
+  const styles = await zip.file('xl/styles.xml')?.async('string')
+  if (!sheet || !styles) return undefined
+  const xfs = /<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/.exec(styles)?.[1].match(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g) ?? []
+  const fmtId = /numFmtId="(\d+)"/.exec(xfs[Number(styleOf(sheet, 'G7', '0'))] ?? '')?.[1]
+  const code = fmtId && new RegExp(`<numFmt numFmtId="${fmtId}" formatCode="([^"]*)"`).exec(styles)?.[1]
+  if (!code) return undefined
+  const format = code.replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+  // [$€-40C] is Excel's locale-tagged symbol; "$" is a quoted literal.
+  return (/\[\$([^\]-]+)/.exec(format) ?? /"([^"0#]+)"/.exec(format))?.[1].trim() || undefined
+}
+
 /** Clone cell style `base` with another number format and return the new style's index. */
 function addNumberStyle(styles: string, base: string, numFmtId: string): { styles: string; index: string } {
   const m = /<cellXfs count="(\d+)">([\s\S]*?)<\/cellXfs>/.exec(styles)
@@ -109,7 +127,7 @@ interface RowStyles {
 function dataRow(r: number, row: SheetRow | undefined, s: RowStyles): string {
   const cells = [`<c r="A${r}" s="${s.index}"><f>ROW()-6</f><v>${r - 6}</v></c>`]
   if (row) {
-    const foreign = row.currency && row.currency !== 'USD' && row.rate !== undefined && row.localAmount !== undefined
+    const converted = row.rate !== undefined && row.localAmount !== undefined
     cells.push(
       numCell(`B${r}`, s.date, excelDate(row.date)),
       strCell(`C${r}`, s.text, row.location),
@@ -118,8 +136,8 @@ function dataRow(r: number, row: SheetRow | undefined, s: RowStyles): string {
       strCell(`F${r}`, s.text, row.type),
       numCell(`G${r}`, s.money, row.amount),
       strCell(`H${r}`, s.text, row.currency ?? 'USD'),
-      foreign ? numCell(`I${r}`, s.text, row.rate!) : `<c r="I${r}" s="${s.text}"/>`,
-      foreign ? numCell(`J${r}`, s.local, row.localAmount!) : `<c r="J${r}" s="${s.text}"/>`,
+      converted ? numCell(`I${r}`, s.text, row.rate!) : `<c r="I${r}" s="${s.text}"/>`,
+      converted ? numCell(`J${r}`, s.local, row.localAmount!) : `<c r="J${r}" s="${s.text}"/>`,
     )
   } else {
     cells.push(

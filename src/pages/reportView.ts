@@ -1,11 +1,12 @@
-import { claimedAmount, sortReceipts, totalClaimed, usdAmount } from '../claim'
+import { claimedAmount, convertedAmount, sortReceipts, totalClaimed } from '../claim'
 import { getReport, getSettings, listReceipts, listTemplates, saveReceipt, saveReport } from '../db'
-import { fmtDate, h, money } from '../dom'
+import { currencySymbol, fmtDate, h, money } from '../dom'
 import { buildExport, download, todayIso } from '../export'
 import { receiptFileName } from '../naming'
 import { needsRate, refreshRates } from '../rates'
 import { addTemplate, templateFor } from '../templates'
-import type { Receipt } from '../types'
+import type { Receipt, Template } from '../types'
+import { templateAmountSymbol } from '../xlsx'
 import { field, go, notice, refresh, select, shell } from './shell'
 
 const ADD_TEMPLATE = '__add__'
@@ -15,14 +16,15 @@ export async function reportViewPage(id: string): Promise<HTMLElement> {
   if (!report) return shell({ title: 'Not found', back: ['/', 'Reports'] }, [notice('error', 'This report no longer exists.')])
   const [settings, templates] = await Promise.all([getSettings(), listTemplates()])
   const receipts = sortReceipts(await listReceipts(id))
-  const { total, pending } = totalClaimed(receipts, settings.caps)
+  const cur = report.currency
+  const { total, pending } = totalClaimed(receipts, settings.caps, cur)
   const today = todayIso()
 
   // ---- exchange rates: fetched in the background, the page redraws when they arrive
   const rateBox = h('div')
   async function getRates(quiet: boolean) {
     if (!quiet) rateBox.replaceChildren(notice('info', 'Getting exchange rates…'))
-    const res = await refreshRates(receipts, today, saveReceipt)
+    const res = await refreshRates(receipts, cur, today, saveReceipt)
     if (res.updated) return refresh()
     if (!quiet) rateBox.replaceChildren(notice(res.missing ? 'warn' : 'ok', res.error ?? (res.missing ? 'No rate is published for those dates yet. Try again later, or type the rate on the receipt.' : 'Rates are up to date.')))
   }
@@ -36,11 +38,20 @@ export async function reportViewPage(id: string): Promise<HTMLElement> {
       ),
     )
   }
-  if (navigator.onLine && receipts.some((r) => needsRate(r, today))) void getRates(true).catch(() => {})
+  if (navigator.onLine && receipts.some((r) => needsRate(r, cur, today))) void getRates(true).catch(() => {})
 
   // ---- template and export
   const status = h('div')
   const chosen = templateFor(report, settings, templates)
+  // A template whose amount column shows another currency's symbol would print EUR amounts with "$".
+  const mismatch = h('div')
+  async function checkSymbol(t: Template | undefined) {
+    mismatch.replaceChildren()
+    const symbol = t && (await templateAmountSymbol(await t.file.arrayBuffer()).catch(() => undefined))
+    if (symbol && symbol !== currencySymbol(cur) && symbol !== cur)
+      mismatch.replaceChildren(notice('warn', `${t.name} shows its amounts with "${symbol}", but this report is in ${cur}. Pick a template for ${cur}, or change the report's currency.`))
+  }
+  void checkSymbol(chosen)
   const picker = h('input', {
     type: 'file',
     accept: '.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -66,6 +77,7 @@ export async function reportViewPage(id: string): Promise<HTMLElement> {
         }
         await saveReport({ ...report, templateId: templateSel.value })
         report.templateId = templateSel.value
+        void checkSymbol(templates.find((t) => t.id === templateSel.value))
       },
     },
     ...templates.map((t) => h('option', { value: t.id, selected: t.id === chosen?.id }, `${t.name}${t.id === settings.defaultTemplateId ? ' (default)' : ''}`)),
@@ -83,9 +95,9 @@ export async function reportViewPage(id: string): Promise<HTMLElement> {
         try {
           const template = templates.find((t) => t.id === templateSel.value) ?? chosen
           if (!template) throw new Error('Add an Excel template first.')
-          if (receipts.some((r) => needsRate(r, today))) {
+          if (receipts.some((r) => needsRate(r, cur, today))) {
             status.replaceChildren(notice('info', 'Getting exchange rates…'))
-            await refreshRates(receipts, today, saveReceipt)
+            await refreshRates(receipts, cur, today, saveReceipt)
           }
           status.replaceChildren(notice('info', 'Building ZIP…'))
           const { blob, name } = await buildExport(report, receipts, settings, template.file)
@@ -105,7 +117,7 @@ export async function reportViewPage(id: string): Promise<HTMLElement> {
     'section',
     { class: 'card pad stack' },
     templates.length
-      ? field('Excel template', templateSel, 'Kept on this device. Add or remove templates in Settings.')
+      ? h('div', { class: 'stack tight' }, field('Excel template', templateSel, 'Kept on this device. Add or remove templates in Settings.'), mismatch)
       : h(
           'div',
           { class: 'stack tight' },
@@ -120,15 +132,15 @@ export async function reportViewPage(id: string): Promise<HTMLElement> {
 
   // ---- receipts
   const amountCell = (r: Receipt) => {
-    const claimed = claimedAmount(r, settings.caps)
-    const usd = usdAmount(r)
-    const foreign = r.currency !== 'USD'
+    const claimed = claimedAmount(r, settings.caps, cur)
+    const converted = convertedAmount(r, cur)
+    const foreign = r.currency !== cur
     return h(
       'td',
       { class: 'num' },
-      claimed === null ? h('span', { class: 'tag warn' }, 'Rate pending') : h('span', { class: 'figure' }, money(claimed)),
-      foreign ? h('div', { class: 'small muted mono' }, money(r.amount, r.currency), r.fx ? ` × ${r.fx.rate}` : '') : null,
-      claimed !== null && usd !== null && claimed !== usd ? h('div', { class: 'small muted mono' }, `of ${money(usd)}`) : null,
+      claimed === null ? h('span', { class: 'tag warn' }, 'Rate pending') : h('span', { class: 'figure' }, money(claimed, cur)),
+      foreign ? h('div', { class: 'small muted mono' }, money(r.amount, r.currency), r.fx?.to === cur ? ` × ${r.fx.rate}` : '') : null,
+      claimed !== null && converted !== null && claimed !== converted ? h('div', { class: 'small muted mono' }, `of ${money(converted, cur)}`) : null,
     )
   }
   const rows = receipts.map((r, i) =>
@@ -157,14 +169,14 @@ export async function reportViewPage(id: string): Promise<HTMLElement> {
             h(
               'tfoot',
               null,
-              h('tr', null, h('td', { colSpan: 3 }, 'Total'), h('td', { class: 'hide-sm' }), h('td', { class: 'num figure' }, money(total), pending ? h('div', { class: 'small muted' }, `+ ${pending} pending`) : null)),
+              h('tr', null, h('td', { colSpan: 3 }, 'Total'), h('td', { class: 'hide-sm' }), h('td', { class: 'num figure' }, money(total, cur), pending ? h('div', { class: 'small muted' }, `+ ${pending} pending`) : null)),
             ),
           ),
         ),
       )
     : h('p', { class: 'card empty' }, 'No receipts in this report yet.')
 
-  const sub = [`${fmtDate(report.from)} – ${fmtDate(report.to)}`, report.projectRef && `Project ${report.projectRef}`, report.invoiced && `Invoiced ${report.invoiced}`].filter(Boolean).join(' · ')
+  const sub = [`${fmtDate(report.from)} – ${fmtDate(report.to)}`, cur, report.projectRef && `Project ${report.projectRef}`, report.invoiced && `Invoiced ${report.invoiced}`].filter(Boolean).join(' · ')
   return shell(
     {
       title: report.name,
