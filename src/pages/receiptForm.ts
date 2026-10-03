@@ -3,9 +3,12 @@ import { deleteReceipt, getReceipt, getSettings, listReports, newReportCurrency,
 import { currencyDigits, currencyOptions, fmtDate, h, money, monthBounds, roundTo } from '../dom'
 import { isPdf, todayIso } from '../export'
 import { extractText, normaliseImage, renderPdfPage } from '../extract'
+import { drivingRoute, irsRate, locateStops, mileageAmount, parseMapLink, shortLabel, toMiles, type Stop } from '../mileage'
+import { tripDescription } from '../naming'
 import { guessFields } from '../parse'
 import { describeRate, fetchRate, needsRate } from '../rates'
-import { EXPENSE_TYPES, type FxRate, type Receipt } from '../types'
+import { drawRouteMap, MAP_FILE_NAME } from '../routeMap'
+import { EXPENSE_TYPES, MILEAGE, usesRoute, type FxRate, type Receipt } from '../types'
 import { askFirst, card, field, go, input, notice, select, shell } from './shell'
 
 const NEW_REPORT = '__new__'
@@ -46,6 +49,31 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
     ...currencyOptions().map(([code, label]) => h('option', { value: code, selected: code === startCurrency }, label)),
   )
   const type = select({ onchange: () => touched.add('type') }, ...EXPENSE_TYPES.map((t) => h('option', { value: t, selected: t === (existing?.type ?? 'Others') }, t)))
+  const routeFrom = input({ type: 'text', value: existing?.routeFrom ?? '', placeholder: 'CDG' })
+  const routeTo = input({ type: 'text', value: existing?.routeTo ?? '', placeholder: 'Paris office' })
+  const mapLink = input({ type: 'url', placeholder: 'https://www.google.com/maps/dir/…', 'aria-label': 'Map link', onchange: () => void findRoute() })
+  const findBtn = h('button', { class: 'btn quiet', type: 'button', onclick: () => void findRoute() }, 'Find route')
+  const routeStatus = h('span')
+  const miles = input({ type: 'number', min: 0, step: '0.1', inputmode: 'decimal', value: existing?.distanceMiles?.toString() ?? '', oninput: () => applyMiles() })
+  const milesHint = h('span')
+  const mileage = h(
+    'div',
+    { class: 'reveal' },
+    h(
+      'div',
+      { class: 'stack' },
+      h(
+        'div',
+        { class: 'field' },
+        h('span', { class: 'kicker' }, 'Map link'),
+        h('div', { class: 'link-pair' }, mapLink, findBtn),
+        h('span', { class: 'hint' }, routeStatus),
+      ),
+      field('Distance (miles)', miles, milesHint),
+    ),
+  )
+  const route = h('div', { class: 'reveal' }, h('div', { class: 'stack' }, h('div', { class: 'pair' }, field('From', routeFrom), field('To', routeTo)), mileage))
+  const descriptionHint = h('span')
   const rate = input({
     type: 'number', min: 0, step: 'any', inputmode: 'decimal',
     oninput: () => {
@@ -158,6 +186,97 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
     refreshClaim()
   }
 
+  // ---- route: From and To open under the type for taxis and mileage
+  function showRoute() {
+    const on = usesRoute(type.value)
+    route.classList.toggle('open', on)
+    route.inert = !on
+    showMileage()
+    descriptionHint.textContent = on
+      ? 'Printed in the Description column. Filled in from the payee, From and To until you change it.'
+      : 'Printed in the Description column. Filled in from the payee until you change it.'
+  }
+
+  // ---- description: follows the payee and route until it is typed by hand
+  const autoDescription = () => (usesRoute(type.value) ? tripDescription(payee.value.trim(), routeFrom.value.trim(), routeTo.value.trim()) : payee.value.trim())
+  let lastAuto = existing ? autoDescription() : ''
+  function syncDescription() {
+    const next = autoDescription()
+    if (description.value.trim() === '' || description.value === lastAuto) description.value = next
+    lastAuto = next
+  }
+  for (const el of [payee, routeFrom, routeTo]) el.addEventListener('input', syncDescription)
+  type.addEventListener('change', () => {
+    showRoute()
+    syncDescription()
+    applyMiles()
+  })
+
+  // ---- mileage: miles times the IRS rate of the trip date; the receipt is a map of the route
+  const isMileage = () => type.value === MILEAGE
+  const tripRate = () => irsRate(date.value || todayIso())
+  const perMile = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 3 })
+  let mapMade = fileName === MAP_FILE_NAME
+  function showMileage() {
+    mileage.classList.toggle('open', isMileage())
+    mileage.inert = !isMileage()
+    if (!routeStatus.textContent) routeStatus.textContent = 'Paste directions from Google Maps, OpenStreetMap or Apple Maps. Or type addresses in From and To, then press Find route.'
+    const r = tripRate()
+    const m = Number(miles.value)
+    milesHint.textContent = [
+      `IRS rate from ${fmtDate(r.since)}: ${perMile(r.rate)} per mile.`,
+      miles.value !== '' && m > 0 ? `${m} mi × ${perMile(r.rate)} = ${money(mileageAmount(m, r.rate))}.` : '',
+      r.known ? '' : `The app has no IRS rate for ${(date.value || todayIso()).slice(0, 4)}. Check irs.gov and type the amount if it changed.`,
+    ].filter(Boolean).join(' ')
+  }
+  /** Sets the receipt total from the miles. A total typed afterwards stays until the miles or the date change. */
+  function applyMiles() {
+    showMileage()
+    const m = Number(miles.value)
+    if (!isMileage() || miles.value === '' || !(m > 0)) return
+    amount.value = mileageAmount(m, tripRate().rate).toFixed(2)
+    touched.add('amount')
+    if (currency.value !== 'USD') {
+      currency.value = 'USD'
+      touched.add('currency')
+    }
+    void updateRate()
+  }
+  async function findRoute() {
+    const say = (m: string) => void (routeStatus.textContent = m)
+    const link = mapLink.value.trim()
+    findBtn.disabled = true
+    try {
+      const stops: Stop[] = link ? parseMapLink(link) : [{ label: routeFrom.value.trim() }, { label: routeTo.value.trim() }]
+      if (stops.some((s) => !s.label && s.lat === undefined)) throw new Error('Paste a map link, or type both addresses in From and To.')
+      if (stops.some((s) => s.lat === undefined)) say('Finding the places…')
+      const located = await locateStops(stops)
+      say('Finding the driving distance…')
+      const road = await drivingRoute(located)
+      const labelled = located.map((s, i) => ({ ...s, label: s.label || road.names[i] || `${s.lat.toFixed(5)}, ${s.lng.toFixed(5)}` }))
+      if (!routeFrom.value.trim()) routeFrom.value = shortLabel(labelled[0].label)
+      if (!routeTo.value.trim()) routeTo.value = shortLabel(labelled[labelled.length - 1].label)
+      syncDescription()
+      const mi = toMiles(road.meters)
+      miles.value = String(mi)
+      applyMiles()
+      const keep = file !== undefined && !mapMade
+      if (!keep) {
+        say('Drawing the map…')
+        file = await drawRouteMap({ line: road.line, stops: labelled, miles: mi, km: Math.round(road.meters / 100) / 10 })
+        fileName = MAP_FILE_NAME
+        mapMade = true
+        void showPreview(file)
+      }
+      say(`${mi} mi by road. ${keep ? 'The file you attached stays as the receipt.' : 'The map at the top of the page is the receipt.'}`)
+    } catch (e) {
+      say(`${e instanceof Error ? e.message : e} You can also type the distance and attach a screenshot of the map.`)
+    } finally {
+      findBtn.disabled = false
+    }
+  }
+  showRoute()
+
   // ---- report selection: suggested from the date, asks when ambiguous
   function refreshReportOptions(selected: string) {
     reportSel.replaceChildren(
@@ -199,6 +318,7 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
   refreshReportOptions(existing?.reportId ?? preset)
   if (existing || preset) touched.add('report')
   date.addEventListener('input', () => {
+    applyMiles()
     suggestReport()
     if (fx?.source === 'Manual') fx = { ...fx, date: date.value }
     void updateRate()
@@ -237,7 +357,8 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
     set('ref', ref, g.ref)
     if (g.currency && [...currency.options].some((o) => o.value === g.currency)) set('currency', currency, g.currency)
     set('amount', amount, g.amount?.toFixed(currencyDigits(currency.value)))
-    if (!touched.has('description') && g.payee) description.value = g.payee
+    showRoute()
+    syncDescription()
     suggestReport()
     void updateRate()
     const found = [g.date, g.amount, g.payee, g.place, g.ref].filter((x) => x !== undefined).length
@@ -255,6 +376,7 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
       return
     }
     fileName = raw.name
+    mapMade = false
     void showPreview(file)
     status.replaceChildren(notice('info', 'Reading receipt…'))
     try {
@@ -280,7 +402,7 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
   async function save(another: boolean) {
     error.replaceChildren()
     const fail = (m: string) => void error.append(notice('error', m))
-    if (!file) return fail('Attach a receipt first.')
+    if (!file) return fail(isMileage() ? 'Find the route to draw the map, or attach a screenshot of it.' : 'Attach a receipt first.')
     if (!date.value) return fail('Enter the receipt date.')
     if (!Number.isFinite(num()) || num() <= 0) return fail('Enter the receipt amount.')
     let reportId = reportSel.value
@@ -300,6 +422,9 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
       place: place.value.trim(),
       description: description.value.trim(),
       type: type.value,
+      routeFrom: usesRoute(type.value) ? routeFrom.value.trim() : '',
+      routeTo: usesRoute(type.value) ? routeTo.value.trim() : '',
+      distanceMiles: isMileage() && Number(miles.value) > 0 ? Number(miles.value) : null,
       ref: ref.value.trim(),
       amount: roundTo(num(), currencyDigits(currency.value)),
       currency: currency.value,
@@ -347,8 +472,9 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
     card('Receipt', [chooser, preview, status]),
     card('Details', [
       h('div', { class: 'pair' }, field('Date', date), field('Type', type)),
+      route,
       h('div', { class: 'pair' }, field('Payee', payee), field('Place', place)),
-      field('Description', description, 'Printed in the Description column.'),
+      field('Description', description, descriptionHint),
       field('Invoice / receipt number', ref),
     ]),
     card('Amount', [

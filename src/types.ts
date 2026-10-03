@@ -21,6 +21,12 @@ export const EXPENSE_TYPES = [
   'Train tickets',
 ] as const
 
+/** Types that get From and To fields; the route goes into the description. */
+export const ROUTE_TYPES: readonly string[] = ['Taxi', 'Mileage allowances']
+export const usesRoute = (type: string) => ROUTE_TYPES.includes(type)
+/** Claimed at the IRS rate per mile; the receipt is a map of the route. */
+export const MILEAGE = 'Mileage allowances'
+
 /** Maximum claimable amount per expense type, seeded from the existing report. Applies in each report's own currency. */
 export const DEFAULT_CAPS: Record<string, number> = {
   'Internet fees': 70,
@@ -62,6 +68,11 @@ export interface Receipt {
   place: string
   description: string
   type: string
+  /** Start and end of a taxi ride or a drive (see ROUTE_TYPES); empty for other types. */
+  routeFrom: string
+  routeTo: string
+  /** Miles driven, for a mileage line; null for other types. */
+  distanceMiles: number | null
   /** Vendor invoice/receipt number; used in the file name when present. */
   ref: string
   /** Total printed on the receipt, in `currency`. */

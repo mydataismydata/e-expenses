@@ -44,8 +44,15 @@ export async function deleteReport(id: string) {
   await tx.done
 }
 
-/** Receipts saved before currencies existed are in USD; rates saved before report currencies existed convert into USD. */
-export const withDefaults = (r: Receipt): Receipt => ({ ...r, currency: r.currency || 'USD', fx: r.fx ? { ...r.fx, to: r.fx.to || 'USD' } : null })
+/** Receipts saved before currencies existed are in USD; rates saved before report currencies existed convert into USD. Older receipts have no route or distance. */
+export const withDefaults = (r: Receipt): Receipt => ({
+  ...r,
+  routeFrom: r.routeFrom ?? '',
+  routeTo: r.routeTo ?? '',
+  distanceMiles: r.distanceMiles ?? null,
+  currency: r.currency || 'USD',
+  fx: r.fx ? { ...r.fx, to: r.fx.to || 'USD' } : null,
+})
 
 export const listReceipts = async (reportId: string) => (await (await dbp).getAllFromIndex('receipts', 'reportId', reportId)).map(withDefaults)
 export async function getReceipt(id: string) {

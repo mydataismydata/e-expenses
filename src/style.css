@@ -47,6 +47,35 @@ body {
   grid-template-columns: minmax(0, 1fr) minmax(0, 11rem);
   gap: var(--sp-2);
 }
+/* From and To slide open under the type for taxis and mileage. Closed, the
+   negative margin cancels the stack gap; the padding keeps focus rings unclipped. */
+.reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  margin-top: calc(-1 * var(--sp-4));
+  opacity: 0;
+  transition:
+    grid-template-rows 220ms ease,
+    margin-top 220ms ease,
+    opacity 220ms ease;
+}
+.reveal.open {
+  grid-template-rows: 1fr;
+  margin-top: 0;
+  opacity: 1;
+}
+.reveal > * {
+  min-height: 0;
+  overflow: hidden;
+  padding: 4px;
+  margin: -4px;
+}
+/* A link and the button that reads it. */
+.link-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-2);
+}
 @media (max-width: 480px) {
   .pair {
     grid-template-columns: minmax(0, 1fr);

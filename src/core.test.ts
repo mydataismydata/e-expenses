@@ -2,7 +2,8 @@ import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 
 import { describe, expect, it } from 'vitest'
 import JSZip from 'jszip'
 import { claimedAmount, convertedAmount, matchingReports, sortReceipts, totalClaimed } from './claim'
-import { receiptFileName, reportBaseName, userTag } from './naming'
+import { receiptFileName, reportBaseName, tripDescription, userTag } from './naming'
+import { drivingRoute, irsRate, locateStops, mileageAmount, parseMapLink, shortLabel, toMiles } from './mileage'
 import { guessCurrency, guessFields } from './parse'
 import { describeRate, fetchRate, needsRate, refreshRates } from './rates'
 import { checkTemplate, fillTemplate, excelDate, templateAmountSymbol, type SheetRow } from './xlsx'
@@ -81,12 +82,20 @@ CB 1.090,00 €`)
 
 describe('naming', () => {
   it('matches the existing convention', () => {
-    expect(receiptFileName(1, { date: '2025-05-14', ref: 'INV-USA-00000001-00000-00', payee: 'Starlink' })).toBe('01 - 2025-05 INV-USA-00000001-00000-00.pdf')
-    expect(receiptFileName(12, { date: '2025-06-02', ref: '', payee: 'Uber/Lyft: ride?' })).toBe('12 - 2025-06 Uber Lyft ride.pdf')
+    expect(receiptFileName(1, { date: '2025-05-14', ref: 'INV-USA-00000001-00000-00', payee: 'Starlink', description: '' })).toBe('01 - 2025-05 INV-USA-00000001-00000-00.pdf')
+    expect(receiptFileName(12, { date: '2025-06-02', ref: '', payee: 'Uber/Lyft: ride?', description: '' })).toBe('12 - 2025-06 Uber Lyft ride.pdf')
+    expect(receiptFileName(3, { date: '2026-09-10', ref: '', payee: '', description: 'Paris office to Charenton' })).toBe('03 - 2026-09 Paris office to Charenton.pdf')
   })
   it('builds the workbook name', () => {
     expect(userTag('Jane Doe')).toBe('J_DOE')
     expect(reportBaseName({ from: '2025-05-01', to: '2025-12-31' }, 'Jane Doe')).toBe('2025-05_to_2025-12_Expenses_J_DOE')
+  })
+  it('writes the route into the description', () => {
+    expect(tripDescription('Uber', 'CDG', 'Paris office')).toBe('Uber CDG to Paris office')
+    expect(tripDescription('', 'Paris office', 'Charenton')).toBe('Paris office to Charenton')
+    expect(tripDescription('Uber', '', 'Paris office')).toBe('Uber to Paris office')
+    expect(tripDescription('G7', 'Orly', '')).toBe('G7 from Orly')
+    expect(tripDescription('Uber', '', '')).toBe('Uber')
   })
 })
 
@@ -122,6 +131,60 @@ describe('claims', () => {
     const reports = [{ from: '2025-01-01', to: '2025-03-31' }, { from: '2025-03-01', to: '2025-04-30' }]
     expect(matchingReports(reports, '2025-03-15')).toHaveLength(2)
     expect(matchingReports(reports, '2025-05-01')).toHaveLength(0)
+  })
+})
+
+describe('mileage', () => {
+  it('uses the IRS rate in force on the trip date', () => {
+    expect(irsRate('2025-05-14')).toEqual({ rate: 0.7, since: '2025-01-01', known: true })
+    expect(irsRate('2026-06-30').rate).toBe(0.725)
+    expect(irsRate('2026-07-01').rate).toBe(0.76)
+    expect(irsRate('2027-02-01')).toEqual({ rate: 0.76, since: '2026-07-01', known: false })
+    expect(irsRate('2021-05-01').known).toBe(false)
+    expect(toMiles(31061.6)).toBe(19.3)
+    expect(mileageAmount(19.3, 0.76)).toBe(14.67)
+  })
+  it('reads Google Maps links', () => {
+    const long =
+      'https://www.google.com/maps/dir/Charles+de+Gaulle+Airport,+95700+Roissy-en-France/Charenton-le-Pont/@48.9174318,2.3708617,11z/data=!3m1!4b1!4m14!4m13!1m5!1m1!1s0x47e63e038e4ccf5b:0x42be0982f5ba62c!2m2!1d2.5479245!2d49.0096906!1m5!1m1!1s0x47e672ffa0d1df8f:0x40b82c3688b3c50!2m2!1d2.4158745!2d48.8215869!3e0?entry=ttu'
+    expect(parseMapLink(long)).toEqual([
+      { label: 'Charles de Gaulle Airport, 95700 Roissy-en-France', lng: 2.5479245, lat: 49.0096906 },
+      { label: 'Charenton-le-Pont', lng: 2.4158745, lat: 48.8215869 },
+    ])
+    expect(shortLabel('Charles de Gaulle Airport, 95700 Roissy-en-France')).toBe('Charles de Gaulle Airport')
+    const fromPoint = 'https://www.google.fr/maps/dir/48.8566,2.3522/Charenton-le-Pont/@48.8,2.4,13z/data=!4m9!4m8!1m0!1m5!1m1!1s0x47e672ffa0d1df8f:0x40b82c3688b3c50!2m2!1d2.4158745!2d48.8215869'
+    expect(parseMapLink(fromPoint)).toEqual([
+      { label: '', lat: 48.8566, lng: 2.3522 },
+      { label: 'Charenton-le-Pont', lng: 2.4158745, lat: 48.8215869 },
+    ])
+    expect(parseMapLink('https://www.google.com/maps/dir/?api=1&origin=CDG+Airport&destination=Charenton-le-Pont&travelmode=driving')).toEqual([{ label: 'CDG Airport' }, { label: 'Charenton-le-Pont' }])
+    expect(() => parseMapLink('https://maps.app.goo.gl/AbCdEf123')).toThrow(/short links/)
+    expect(() => parseMapLink('https://www.google.com/maps/place/Charenton-le-Pont/@48.8,2.4,14z')).toThrow(/not directions/)
+    expect(() => parseMapLink('https://www.google.com/maps/dir//Charenton-le-Pont/@48.8,2.4,14z/data=!4m8!4m7!1m0!1m5!1m1!1s0x1:0x2!2m2!1d2.4158745!2d48.8215869')).toThrow(/Your location/)
+    expect(() => parseMapLink('Paris office')).toThrow(/not a link/)
+  })
+  it('reads OpenStreetMap and Apple Maps links', () => {
+    expect(parseMapLink('https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=49.0097%2C2.5479%3B48.8216%2C2.4159#map=12/48.9/2.4')).toEqual([
+      { label: '', lat: 49.0097, lng: 2.5479 },
+      { label: '', lat: 48.8216, lng: 2.4159 },
+    ])
+    expect(parseMapLink('https://maps.apple.com/?saddr=Paris&daddr=Lyon&dirflg=d')).toEqual([{ label: 'Paris' }, { label: 'Lyon' }])
+  })
+  it('finds places and the road distance', async () => {
+    const urls: string[] = []
+    const fake = (body: unknown, status = 200) => (async (u: string) => (urls.push(u), new Response(JSON.stringify(body), { status }))) as typeof fetch
+    let pauses = 0
+    const pause = async () => void pauses++
+    const located = await locateStops([{ label: 'Paris office' }, { label: '', lat: 48.82, lng: 2.41 }, { label: 'Lyon' }], fake([{ lat: '48.85', lon: '2.35' }]), pause)
+    expect(located[0]).toEqual({ label: 'Paris office', lat: 48.85, lng: 2.35 })
+    expect(urls).toEqual(['https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=Paris%20office', 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=Lyon'])
+    expect(pauses).toBe(1)
+    await expect(locateStops([{ label: 'Nowhere' }], fake([]), pause)).rejects.toThrow(/Could not find "Nowhere"/)
+    urls.length = 0
+    const route = await drivingRoute(located.slice(0, 2), fake({ code: 'Ok', routes: [{ distance: 31061.6, geometry: { coordinates: [[2.35, 48.85], [2.41, 48.82]] } }], waypoints: [{ name: 'Rue A' }, { name: 'Rue B' }] }))
+    expect(urls[0]).toBe('https://router.project-osrm.org/route/v1/driving/2.350000,48.850000;2.410000,48.820000?overview=full&geometries=geojson')
+    expect(route).toEqual({ meters: 31061.6, line: [[2.35, 48.85], [2.41, 48.82]], names: ['Rue A', 'Rue B'] })
+    await expect(drivingRoute(located.slice(0, 2), fake({ code: 'NoRoute' }, 400))).rejects.toThrow(/No road/)
   })
 })
 

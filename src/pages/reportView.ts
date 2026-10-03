@@ -149,7 +149,7 @@ export async function reportViewPage(id: string): Promise<HTMLElement> {
       { class: 'click', onclick: () => go(`/receipt/${r.id}`) },
       h('td', { class: 'mono' }, String(i + 1)),
       h('td', { class: 'nowrap' }, fmtDate(r.date)),
-      h('td', null, h('a', { href: `#/receipt/${r.id}` }, r.payee || '—'), h('div', { class: 'file' }, receiptFileName(i + 1, r))),
+      h('td', null, h('a', { href: `#/receipt/${r.id}` }, r.payee || r.description || '—'), h('div', { class: 'file' }, receiptFileName(i + 1, r))),
       h('td', { class: 'hide-sm' }, r.type),
       amountCell(r),
     ),
