@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 
 import { describe, expect, it } from 'vitest'
 import JSZip from 'jszip'
 import { claimedAmount, convertedAmount, matchingReports, sortReceipts, totalClaimed } from './claim'
+import { dragRect } from './cropper'
 import { receiptFileName, reportBaseName, tripDescription, userTag } from './naming'
 import { drivingRoute, irsRate, locateStops, mileageAmount, parseMapLink, shortLabel, toMiles } from './mileage'
 import { guessCurrency, guessFields } from './parse'
@@ -131,6 +132,22 @@ describe('claims', () => {
     const reports = [{ from: '2025-01-01', to: '2025-03-31' }, { from: '2025-03-01', to: '2025-04-30' }]
     expect(matchingReports(reports, '2025-03-15')).toHaveLength(2)
     expect(matchingReports(reports, '2025-05-01')).toHaveLength(0)
+  })
+})
+
+describe('crop', () => {
+  const full = { x: 0, y: 0, w: 1, h: 1 }
+  const near = (r: { x: number; y: number; w: number; h: number }) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, Math.round(v * 1000) / 1000]))
+  it('moves edges and corners inside the photo', () => {
+    expect(near(dragRect(full, 'nw', 0.1, 0.2))).toEqual({ x: 0.1, y: 0.2, w: 0.9, h: 0.8 })
+    expect(near(dragRect(full, 'se', -0.3, -0.1))).toEqual({ x: 0, y: 0, w: 0.7, h: 0.9 })
+    expect(near(dragRect(full, 'e', 0.5, 0.5))).toEqual(full)
+    expect(near(dragRect(full, 'n', 0.3, 2))).toEqual({ x: 0, y: 0.95, w: 1, h: 0.05 })
+  })
+  it('moves the whole box without leaving the photo', () => {
+    const r = { x: 0.2, y: 0.2, w: 0.5, h: 0.5 }
+    expect(near(dragRect(r, 'move', 0.1, -0.1))).toEqual({ x: 0.3, y: 0.1, w: 0.5, h: 0.5 })
+    expect(near(dragRect(r, 'move', 1, 1))).toEqual({ x: 0.5, y: 0.5, w: 0.5, h: 0.5 })
   })
 })
 

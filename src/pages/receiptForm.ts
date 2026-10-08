@@ -1,4 +1,5 @@
 import { claimedAmount, convertedAmount, matchingReports } from '../claim'
+import { cropImage, type CropResult } from '../cropper'
 import { deleteReceipt, getReceipt, getSettings, listReports, newReportCurrency, saveReceipt, saveReport, uid } from '../db'
 import { currencyDigits, currencyOptions, fmtDate, h, money, monthBounds, roundTo } from '../dom'
 import { isPdf, todayIso } from '../export'
@@ -108,6 +109,7 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
   const claimHint = h('span')
   const status = h('div')
   const preview = h('div', { class: 'preview' })
+  const cropHost = h('div')
   const error = h('div')
 
   const num = () => (amount.value === '' ? NaN : Number(amount.value))
@@ -331,8 +333,11 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
   refreshReport()
 
   // ---- file handling and pre-fill
+  let previewUrl = ''
   async function showPreview(f: Blob) {
     preview.replaceChildren()
+    if (previewUrl) URL.revokeObjectURL(previewUrl)
+    previewUrl = ''
     if (isPdf(f)) {
       try {
         const c = await renderPdfPage(f, 700)
@@ -341,7 +346,43 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
         preview.append(h('p', { class: 'muted' }, 'PDF attached.'))
       }
     } else {
-      preview.append(h('img', { src: URL.createObjectURL(f), alt: 'Receipt preview' }))
+      previewUrl = URL.createObjectURL(f)
+      preview.append(
+        h('img', { src: previewUrl, alt: 'Receipt preview' }),
+        h('div', { class: 'row' }, h('button', { class: 'btn quiet sm', type: 'button', onclick: () => void recrop() }, 'Crop')),
+      )
+    }
+  }
+
+  /** Shows the crop box in place of the file buttons and preview until the user is done. */
+  async function crop(image: Blob, fromCamera: boolean): Promise<CropResult> {
+    chooser.hidden = true
+    preview.hidden = true
+    status.replaceChildren()
+    try {
+      return await cropImage(cropHost, image, fromCamera ? () => camera.click() : undefined)
+    } finally {
+      chooser.hidden = false
+      preview.hidden = false
+    }
+  }
+  async function recrop() {
+    if (!file || isPdf(file)) return
+    const got = await crop(file, false)
+    if (!(got instanceof Blob)) return
+    file = got
+    void showPreview(file)
+    // Reading a tighter crop can find more; it only fills fields not yet set.
+    if (!existing) await read(false)
+  }
+
+  async function read(pdf: boolean) {
+    if (!file) return
+    status.replaceChildren(notice('info', 'Reading receipt…'))
+    try {
+      applyGuess(await extractText(file, pdf, (msg, p) => status.replaceChildren(notice('info', p !== undefined ? `${msg} ${Math.round(p * 100)}%` : `${msg}…`))))
+    } catch (e) {
+      status.replaceChildren(notice('warn', `Automatic reading failed (${e instanceof Error ? e.message : e}). Please fill in the fields.`))
     }
   }
 
@@ -365,29 +406,42 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
     status.replaceChildren(notice(found ? 'info' : 'warn', found ? 'Fields pre-filled from the receipt. Please check them.' : 'Could not read much from this receipt. Please fill in the fields.'))
   }
 
-  async function onFile(raw: File | undefined) {
+  /** A photo from the camera opens in the crop box first; a chosen file is used as it is and can be cropped from the preview. */
+  async function onFile(raw: File | undefined, fromCamera: boolean) {
     if (!raw) return
     error.replaceChildren()
     const pdf = raw.type === 'application/pdf' || raw.name.toLowerCase().endsWith('.pdf')
+    let next: Blob
     try {
-      file = pdf ? new Blob([await raw.arrayBuffer()], { type: 'application/pdf' }) : await normaliseImage(raw)
+      next = pdf ? new Blob([await raw.arrayBuffer()], { type: 'application/pdf' }) : await normaliseImage(raw)
     } catch {
       status.replaceChildren(notice('error', 'Could not open that file. Use a PDF, JPG or PNG.'))
       return
     }
+    if (fromCamera && !pdf) {
+      const got = await crop(next, true)
+      if (got === 'retake') return
+      if (got instanceof Blob) next = got
+    }
+    file = next
     fileName = raw.name
     mapMade = false
     void showPreview(file)
-    status.replaceChildren(notice('info', 'Reading receipt…'))
-    try {
-      applyGuess(await extractText(file, pdf, (msg, p) => status.replaceChildren(notice('info', p !== undefined ? `${msg} ${Math.round(p * 100)}%` : `${msg}…`))))
-    } catch (e) {
-      status.replaceChildren(notice('warn', `Automatic reading failed (${e instanceof Error ? e.message : e}). Please fill in the fields.`))
-    }
+    await read(pdf)
   }
 
-  const camera = h('input', { type: 'file', accept: 'image/*', capture: 'environment', onchange: () => onFile(camera.files?.[0]) })
-  const picker = h('input', { type: 'file', accept: 'image/*,application/pdf,.pdf', onchange: () => onFile(picker.files?.[0]) })
+  // Cleared after each pick, so taking or choosing the same file again still counts as a change.
+  const fileInput = (props: Record<string, unknown>, fromCamera: boolean) => {
+    const el = h('input', { ...props, type: 'file' })
+    el.onchange = () => {
+      const f = el.files?.[0]
+      el.value = ''
+      void onFile(f, fromCamera)
+    }
+    return el
+  }
+  const camera = fileInput({ accept: 'image/*', capture: 'environment' }, true)
+  const picker = fileInput({ accept: 'image/*,application/pdf,.pdf' }, false)
   const chooser = h(
     'div',
     { class: 'row' },
@@ -469,7 +523,7 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
   const form = h(
     'form',
     { class: 'stack', onsubmit: (e: Event) => { e.preventDefault(); void save(false) } },
-    card('Receipt', [chooser, preview, status]),
+    card('Receipt', [chooser, cropHost, preview, status]),
     card('Details', [
       h('div', { class: 'pair' }, field('Date', date), field('Type', type)),
       route,

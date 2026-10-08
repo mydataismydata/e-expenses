@@ -91,6 +91,11 @@ body {
 .preview:empty {
   display: none;
 }
+.preview {
+  display: grid;
+  gap: var(--sp-2);
+  justify-items: start;
+}
 .preview img,
 .preview canvas {
   display: block;
@@ -155,6 +160,93 @@ body {
 }
 .toast.update .btn {
   height: var(--control-h-sm);
+}
+
+/* The hidden attribute wins over layout classes such as .row and .field. */
+[hidden] {
+  display: none !important;
+}
+
+/* Crop box over a receipt photo. Outside the box the photo is dimmed. */
+.crop {
+  display: grid;
+  gap: var(--sp-3);
+  justify-items: center;
+}
+.crop .hint {
+  justify-self: start;
+  color: var(--c-muted);
+  font-size: var(--fs-sm);
+}
+.crop .row {
+  justify-self: start;
+  flex-wrap: wrap;
+}
+.crop-stage {
+  position: relative;
+  margin: 12px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.crop-image {
+  display: block;
+}
+.crop-clip {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.crop-shade {
+  position: absolute;
+  box-shadow: 0 0 0 9999px rgb(0 0 0 / 0.55);
+}
+.crop-box {
+  position: absolute;
+  outline: 2px solid #fff;
+  cursor: move;
+}
+/* Each grip is a 44px touch target around a small visible mark. */
+.crop-grip {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  display: grid;
+  place-items: center;
+}
+.crop-grip::after {
+  content: '';
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--c-accent);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.4);
+}
+.crop-grip[data-grip='n']::after,
+.crop-grip[data-grip='s']::after {
+  width: 30px;
+  height: 10px;
+  border-radius: 5px;
+}
+.crop-grip[data-grip='e']::after,
+.crop-grip[data-grip='w']::after {
+  width: 10px;
+  height: 30px;
+  border-radius: 5px;
+}
+.crop-grip[data-grip='nw'] { left: 0; top: 0; cursor: nwse-resize; }
+.crop-grip[data-grip='n'] { left: 50%; top: 0; cursor: ns-resize; }
+.crop-grip[data-grip='ne'] { left: 100%; top: 0; cursor: nesw-resize; }
+.crop-grip[data-grip='e'] { left: 100%; top: 50%; cursor: ew-resize; }
+.crop-grip[data-grip='se'] { left: 100%; top: 100%; cursor: nwse-resize; }
+.crop-grip[data-grip='s'] { left: 50%; top: 100%; cursor: ns-resize; }
+.crop-grip[data-grip='sw'] { left: 0; top: 100%; cursor: nesw-resize; }
+.crop-grip[data-grip='w'] { left: 0; top: 50%; cursor: ew-resize; }
+.crop-grip:focus-visible {
+  outline-offset: -8px;
 }
 
 input[type='file'] {
