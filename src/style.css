@@ -139,6 +139,92 @@ body {
   color: var(--c-muted);
 }
 
+/* A tap on the preview opens the receipt full screen. */
+.preview img,
+.pager-page canvas {
+  cursor: zoom-in;
+}
+
+/* Full-screen receipt: dark around the page in either theme, one page in view, tap to zoom. */
+.viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  color: #fff;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.viewer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: rgb(255 255 255 / 0.75);
+}
+.viewer-close {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.14);
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+}
+.viewer-close:hover {
+  background: rgb(255 255 255 / 0.24);
+}
+.viewer-track {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.viewer-track::-webkit-scrollbar {
+  display: none;
+}
+/* Each page scrolls by itself when zoomed. margin: auto centres the page without hiding an overflowing edge. */
+.viewer-page {
+  flex: 0 0 100%;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scroll-snap-align: start;
+  padding: var(--sp-2);
+}
+.viewer-media {
+  display: block;
+  margin: auto;
+  max-width: 100%;
+  max-height: 100%;
+  height: auto;
+  background: #fff;
+  cursor: zoom-in;
+}
+.viewer.zoomed .viewer-track {
+  overflow-x: hidden;
+}
+.viewer.zoomed .viewer-media {
+  max-width: none;
+  max-height: none;
+  cursor: zoom-out;
+}
+.viewer-note {
+  margin: auto;
+  color: rgb(255 255 255 / 0.75);
+}
+
 /* Receipts table: the payee cell carries the export file name under it. */
 .table .file {
   font-family: var(--font-mono);

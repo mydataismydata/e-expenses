@@ -69,6 +69,12 @@ export async function renderPdfPage(file: Blob, width = 900): Promise<HTMLCanvas
   }
 }
 
+/** A PDF kept open to draw pages on demand, numbered from 1. Call close() when done. */
+export async function pdfPages(file: Blob): Promise<{ count: number; draw: (n: number, width: number) => Promise<HTMLCanvasElement>; close: () => void }> {
+  const { task, doc } = await openPdf(file)
+  return { count: doc.numPages, draw: (n, width) => drawPage(doc, n, width), close: () => void task.destroy() }
+}
+
 /** Draws the pages of a PDF in order, up to `max`, handing each canvas to `onPage` as soon as it is ready. Returns the page count. */
 export async function renderPdfPages(file: Blob, width: number, max: number, onPage: (canvas: HTMLCanvasElement, n: number, total: number) => void): Promise<number> {
   const { task, doc } = await openPdf(file)

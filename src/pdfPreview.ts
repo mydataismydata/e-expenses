@@ -5,10 +5,11 @@ const MAX_PAGES = 30
 
 /**
  * A PDF shown one page at a time. With more than one page, a swipe (or the buttons, or the arrow keys)
- * moves between them, and "Page n of m" sits under the page. Resolves once the first page is drawn.
+ * moves between them, and "Page n of m" sits under the page. A tap or Enter calls `open` with the page in view
+ * (from 0). Resolves once the first page is drawn.
  */
-export async function pdfPreview(file: Blob): Promise<HTMLElement> {
-  const track = h('div', { class: 'pager-track', tabindex: 0, role: 'region', 'aria-label': 'Receipt pages' })
+export async function pdfPreview(file: Blob, open?: (page: number) => void): Promise<HTMLElement> {
+  const track = h('div', { class: 'pager-track', tabindex: 0, role: 'region', 'aria-label': open ? 'Receipt pages. Enter opens full screen.' : 'Receipt pages' })
   const label = h('span', { class: 'pager-label', 'aria-live': 'polite' })
   const prev = h('button', { class: 'btn quiet sm', type: 'button', 'aria-label': 'Previous page' }, '‹')
   const next = h('button', { class: 'btn quiet sm', type: 'button', 'aria-label': 'Next page' }, '›')
@@ -29,6 +30,10 @@ export async function pdfPreview(file: Blob): Promise<HTMLElement> {
   prev.onclick = () => turn(-1)
   next.onclick = () => turn(1)
   track.addEventListener('scroll', update, { passive: true })
+  if (open) {
+    track.addEventListener('click', (e) => (e.target as HTMLElement).closest('canvas') && open(current()))
+    track.addEventListener('keydown', (e) => e.key === 'Enter' && open(current()))
+  }
 
   let shown!: () => void
   const firstPage = new Promise<void>((r) => (shown = r))

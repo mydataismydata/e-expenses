@@ -8,6 +8,7 @@ import { drivingRoute, irsRate, locateStops, mileageAmount, parseMapLink, shortL
 import { tripDescription } from '../naming'
 import { guessFields } from '../parse'
 import { pdfPreview } from '../pdfPreview'
+import { openViewer } from '../viewer'
 import { describeRate, fetchRate, needsRate } from '../rates'
 import { drawRouteMap, MAP_FILE_NAME } from '../routeMap'
 import { EXPENSE_TYPES, MILEAGE, usesRoute, type FxRate, type Receipt } from '../types'
@@ -344,7 +345,7 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
     if (isPdf(f)) {
       let shown: Node
       try {
-        shown = await pdfPreview(f)
+        shown = await pdfPreview(f, (page) => void openViewer(f, true, page))
       } catch {
         shown = h('p', { class: 'muted' }, 'PDF attached.')
       }
@@ -353,7 +354,14 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
     } else {
       previewUrl = URL.createObjectURL(f)
       preview.append(
-        h('img', { src: previewUrl, alt: 'Receipt preview' }),
+        h('img', {
+          src: previewUrl,
+          alt: 'Receipt. Opens full screen.',
+          tabindex: 0,
+          role: 'button',
+          onclick: () => void openViewer(f, false),
+          onkeydown: (e: KeyboardEvent) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), void openViewer(f, false)),
+        }),
         h('div', { class: 'row' }, h('button', { class: 'btn quiet sm', type: 'button', onclick: () => void recrop() }, 'Crop')),
       )
     }
