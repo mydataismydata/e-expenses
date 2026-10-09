@@ -3,10 +3,11 @@ import { cropImage, type CropResult } from '../cropper'
 import { deleteReceipt, getReceipt, getSettings, listReports, newReportCurrency, saveReceipt, saveReport, uid } from '../db'
 import { currencyDigits, currencyOptions, fmtDate, h, money, monthBounds, roundTo } from '../dom'
 import { isPdf, todayIso } from '../export'
-import { extractText, normaliseImage, renderPdfPage } from '../extract'
+import { extractText, normaliseImage } from '../extract'
 import { drivingRoute, irsRate, locateStops, mileageAmount, parseMapLink, shortLabel, toMiles, type Stop } from '../mileage'
 import { tripDescription } from '../naming'
 import { guessFields } from '../parse'
+import { pdfPreview } from '../pdfPreview'
 import { describeRate, fetchRate, needsRate } from '../rates'
 import { drawRouteMap, MAP_FILE_NAME } from '../routeMap'
 import { EXPENSE_TYPES, MILEAGE, usesRoute, type FxRate, type Receipt } from '../types'
@@ -334,17 +335,21 @@ export async function receiptFormPage(id: string | undefined, presetReportId: st
 
   // ---- file handling and pre-fill
   let previewUrl = ''
+  let previewToken = 0
   async function showPreview(f: Blob) {
+    const mine = ++previewToken
     preview.replaceChildren()
     if (previewUrl) URL.revokeObjectURL(previewUrl)
     previewUrl = ''
     if (isPdf(f)) {
+      let shown: Node
       try {
-        const c = await renderPdfPage(f, 700)
-        preview.append(c)
+        shown = await pdfPreview(f)
       } catch {
-        preview.append(h('p', { class: 'muted' }, 'PDF attached.'))
+        shown = h('p', { class: 'muted' }, 'PDF attached.')
       }
+      // A newer file may have been attached while this one was drawing.
+      if (mine === previewToken) preview.append(shown)
     } else {
       previewUrl = URL.createObjectURL(f)
       preview.append(

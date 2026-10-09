@@ -104,6 +104,41 @@ body {
   border: 1px solid var(--c-line);
 }
 
+/* A PDF preview: pages side by side with one in view. Swipe, or use the buttons under it. */
+.pager {
+  justify-self: stretch;
+  display: grid;
+  gap: var(--sp-2);
+}
+.pager-track {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.pager-track::-webkit-scrollbar {
+  display: none;
+}
+.pager-page {
+  flex: 0 0 100%;
+  scroll-snap-align: start;
+  display: grid;
+  justify-items: start;
+}
+.pager-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.pager-label {
+  min-width: 11ch;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--c-muted);
+}
+
 /* Receipts table: the payee cell carries the export file name under it. */
 .table .file {
   font-family: var(--font-mono);

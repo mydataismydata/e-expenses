@@ -42,10 +42,14 @@ async function ocr(image: Blob | HTMLCanvasElement): Promise<string> {
   return data.text
 }
 
-/** Render page 1 of a PDF to a canvas (for previews and for scanned PDFs that need OCR). */
-export async function renderPdfPage(file: Blob, width = 900): Promise<HTMLCanvasElement> {
-  const doc = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise
-  const page = await doc.getPage(1)
+/** The open document, and its loading task, which frees the document when destroyed. */
+async function openPdf(file: Blob) {
+  const task = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) })
+  return { task, doc: await task.promise }
+}
+
+async function drawPage(doc: pdfjs.PDFDocumentProxy, n: number, width: number): Promise<HTMLCanvasElement> {
+  const page = await doc.getPage(n)
   const base = page.getViewport({ scale: 1 })
   const viewport = page.getViewport({ scale: width / base.width })
   const canvas = document.createElement('canvas')
@@ -53,6 +57,27 @@ export async function renderPdfPage(file: Blob, width = 900): Promise<HTMLCanvas
   canvas.height = viewport.height
   await page.render({ canvas, canvasContext: canvas.getContext('2d')!, viewport }).promise
   return canvas
+}
+
+/** Render page 1 of a PDF to a canvas (for scanned PDFs that need OCR). */
+export async function renderPdfPage(file: Blob, width = 900): Promise<HTMLCanvasElement> {
+  const { task, doc } = await openPdf(file)
+  try {
+    return await drawPage(doc, 1, width)
+  } finally {
+    void task.destroy()
+  }
+}
+
+/** Draws the pages of a PDF in order, up to `max`, handing each canvas to `onPage` as soon as it is ready. Returns the page count. */
+export async function renderPdfPages(file: Blob, width: number, max: number, onPage: (canvas: HTMLCanvasElement, n: number, total: number) => void): Promise<number> {
+  const { task, doc } = await openPdf(file)
+  try {
+    for (let n = 1; n <= Math.min(doc.numPages, max); n++) onPage(await drawPage(doc, n, width), n, doc.numPages)
+    return doc.numPages
+  } finally {
+    void task.destroy()
+  }
 }
 
 async function pdfText(file: Blob): Promise<string> {
